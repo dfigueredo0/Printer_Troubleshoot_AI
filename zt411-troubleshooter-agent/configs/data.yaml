@@ -1,0 +1,4 @@
+data:
+  raw_path: data/sample/sample_cases.jsonl
+  cache_dir: data/cache
+  split_ratio: 0.8

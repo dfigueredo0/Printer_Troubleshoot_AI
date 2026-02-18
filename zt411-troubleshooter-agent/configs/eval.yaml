@@ -1,0 +1,5 @@
+eval:
+  metrics:
+    - accuracy
+    - f1
+  output_dir: reports/
