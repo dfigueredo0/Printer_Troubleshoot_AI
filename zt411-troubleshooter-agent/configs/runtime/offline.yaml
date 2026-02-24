@@ -1,0 +1,30 @@
+runtime:
+  mode: offline
+  tier: tier0
+
+llm:
+  planner_backend: ollama
+  model: "granite4"
+
+rag:
+  mode: local_only
+
+tools:
+  runner: inline # simplest for field kit; can still use rq if you run redis locally
+
+privileges:
+  allow_elevation: false
+
+# Offline: tighten defaults
+confirmation:
+  enabled: true
+  required_for_risk:
+    ["destructive", "config_change", "firmware", "reboot", "service_restart"]
+  allow_service_restart: false
+
+audit:
+  evidence_required: true
+
+sync:
+  enable: true
+  mode: deferred

@@ -1,0 +1,98 @@
+runtime:
+  mode: auto # auto|cloud|offline
+  tier: auto # auto|tier0|tier1|tier2 (0=offline, 1=local LLM, 2=remote API)
+  env: auto # auto|dev|prod
+  deterministic: true # whether to use temperature=0 for LLM responses, or allow some randomness (false is useful for testing and debugging)
+  max_loop_steps: 10 # safety cutoff to prevent infinite loops
+  decision_timeout: 5 # seconds to wait for LLM to respond before timing out and retrying (can be increased if using a slower model or API)
+  first_action_timeout: 10 # seconds to wait for the first action to be generated, which can take longer if the model is cold or the prompt is long
+
+connectivity:
+  probe:
+    enable: true
+    targets:
+      - "1.1.1.1:53" # Cloudflare DNS
+      - "8.8.8.8:53" # Google DNS
+      - "www.zebra.com:443" # Zebra website
+    pritner_probe:
+      enable: true
+      default_port:
+        [9100, 631, 515, 80, 443]
+        # default port to probe on the printer, can be overridden by network specialist if known
+
+llm:
+  planner_backend: claude # claude|ollama (test at some point claude vs. gpt)
+  model: "claude-sonnet-4.6"
+  temperature: 0.0 # set to >0 for more creative responses, but can cause non-determinism
+  max_tokens: 2048 # max tokens for the planner response, adjust based on expected response length and model limits
+  json_schema:
+    enable: true # whether to enforce JSON schema on the planner's response for better structure and error handling
+    retries: 3 # number of times to retry if the planner fails to produce valid JSON
+  timeout: 30 # seconds to wait for the planner to respond before timing out and retrying, can be increased for slower models or complex prompts
+  require_citations: true
+  disallow_hallucinations: true # if true, the planner must cite a doc snippet for every action recommendation, otherwise it will be rejected by the validation specialist
+
+ollama:
+  host: "http://localhost:11434" # Ollama server URL, adjust if your Ollama instance is running elsewhere
+  model: "granite4" # granite4|glm-5|lfm2
+  temperature: 0.0
+  num_ctx: 8192
+
+rag:
+  mode: local # local|remote|hybrid
+  embedding_model:
+    sentence-transformers/all-MiniLM-L6-v2
+    # should match the embedding model used for the vector store; check diff btwn (BAAI/bge-base-en-v1.5)
+  faiss_index_path: data/rag/faiss.index
+  docstore_path: data/rag/docstore.sqlite
+  top_k: 6 # number of relevant snippets to retrieve for grounding the planner's decisions
+  max_snippets: 8
+  min_score: 0.25
+  rerank:
+    enable: false
+  cache:
+    enable: true
+    dir: data/rag/cache/
+  prompt_injection_protection:
+    enable: true
+    strip_instructions: true # whether to remove instruction-like text from retrieved snippets to prevent prompt injection
+    patterns:
+      - ".*(delete|format|shutdown|rm|del|erase).*" # simple regex patterns to block dangerous actions in retrieved docs, can be expanded for better coverage
+    allowlist:
+      - ["zebra", "internal_kb"]
+      - ".*(restart|resume|clear).*" # allow certain actions that might be risky in general but are necessary for troubleshooting, with confirmation from validation specialist
+  tools:
+    runner: rq # rq|celery|local
+    rate_limits:
+      per_printer_per_minute: 20
+      per_tool_per_minute: 60
+    default_timeout: 30 # seconds to wait for a tool action to complete before timing out, can be adjusted based on expected action duration and system performance
+    redaction:
+      enable: true
+      patterns:
+        - ".*(password|secret|token|key).*" # regex patterns to identify sensitive information in tool outputs for redaction in the planner's view, can be expanded based on observed data
+
+confirmation:
+  enable: true
+  token_ttl: 900 # seconds that a confirmation token is valid for, can be adjusted based on expected response times and criticality of actions
+  timeout: 30 # seconds to wait for confirmation from the validation specialist before assuming a negative response, can be adjusted based on expected response times and criticality of actions
+  required_for:
+    ["destructive", "config_change", "firmware", "reboot"]
+    # list of actions that require explicit confirmation from the validation specialist before execution, can be expanded based on risk assessment of actions
+
+privilege_checks:
+  require_admin_for:
+    ["windows.driver.*", "windows.port.*", "cups.queue.*", "device.firmware.*"]
+  allow_elevation: false # never auto-elevate
+
+audit:
+  store_tool_io: true
+  store_retrieval_context: true
+  store_state_snapshots: true
+  append_only_event_log: true # whether to append to the audit log or overwrite it on each run, append is generally safer for preserving history but can lead to large files over time
+  evidence_required: true
+
+sync:
+  enabled: true
+  mode: deferred #deferred|realtime
+  spool_dir: "data/sync/spool/"
