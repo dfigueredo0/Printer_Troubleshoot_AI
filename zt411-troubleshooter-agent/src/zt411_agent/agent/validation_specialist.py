@@ -6,3 +6,6 @@ Produces audit trail: decision → evidence → action → result, with citation
 Detects hallucination risk: refuses to claim success without tool output or doc snippet.
 Evidence: before/after diffs of state snapshot, tool outputs, confirmation tokens.
 """
+
+#TODO: Implement validation_specialist.py 
+# confirmation token issue/verify, risk classification, before/after state diff, success criteria check

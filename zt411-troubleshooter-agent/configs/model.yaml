@@ -1,4 +1,0 @@
-model:
-  name: baseline
-  embedding_model: sentence-transformers/all-MiniLM-L6-v2 # or BAAI/bge-base-en-v1.5 for better retrieval if resources allow (heavier)
-  max_steps: 5

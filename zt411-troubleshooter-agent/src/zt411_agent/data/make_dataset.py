@@ -1,0 +1,1 @@
+#TODO: Build document ingestion pipeline (data/make_dataset.py) — chunk Zebra ZT411 manuals + internal KB into FAISS + docstore

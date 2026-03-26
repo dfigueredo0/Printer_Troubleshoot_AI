@@ -1,0 +1,1 @@
+#TODO: Implement tools.py — tool registry with schema, executor, rate limiter, timeout, and output redaction

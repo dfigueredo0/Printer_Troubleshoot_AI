@@ -5,3 +5,5 @@ Maintains offline cache, handles limited connectivity, and blocks prompt injecti
 Provides “what to check next” suggestions tied to doc references and device state.
 Evidence: snippet_id, source, section, page/anchor, extracted constraints/warnings.
 """
+
+#TODO: Implement rag.py — retrieval against FAISS index + SQLite docstore, deduplication, reranking stub, cache layer
