@@ -4,15 +4,15 @@ runtime:
 
 llm:
   planner_backend: claude
-  model: "claude-sonnet-4.6"
+  model: 'claude-sonnet-4-6'
 
 rag:
   mode: hybrid
   remote:
     enable: true
     backend: opensearch # opensearch|kb_api etc, adjust config below based on backend choice
-    endpoint: "${OPENSEARCH_ENDPOINT}"
-    index: "zt411-kb"
+    endpoint: '${OPENSEARCH_ENDPOINT}'
+    index: 'zt411-kb'
     top_k: 6
 
 tools:

@@ -11,9 +11,9 @@ connectivity:
   probe:
     enable: true
     targets:
-      - "1.1.1.1:53" # Cloudflare DNS
-      - "8.8.8.8:53" # Google DNS
-      - "www.zebra.com:443" # Zebra website
+      - '1.1.1.1:53' # Cloudflare DNS
+      - '8.8.8.8:53' # Google DNS
+      - 'www.zebra.com:443' # Zebra website
     pritner_probe:
       enable: true
       default_port:
@@ -22,7 +22,7 @@ connectivity:
 
 llm:
   planner_backend: claude # claude|ollama (test at some point claude vs. gpt)
-  model: "claude-sonnet-4.6"
+  model: 'claude-sonnet-4-6'
   temperature: 0.0 # set to >0 for more creative responses, but can cause non-determinism
   max_tokens: 2048 # max tokens for the planner response, adjust based on expected response length and model limits
   json_schema:
@@ -33,8 +33,8 @@ llm:
   disallow_hallucinations: true # if true, the planner must cite a doc snippet for every action recommendation, otherwise it will be rejected by the validation specialist
 
 ollama:
-  host: "http://localhost:11434" # Ollama server URL, adjust if your Ollama instance is running elsewhere
-  model: "granite4" # granite4|glm-5|lfm2
+  host: 'http://localhost:11434' # Ollama server URL, adjust if your Ollama instance is running elsewhere
+  model: 'granite4' # granite4|glm-5|lfm2
   temperature: 0.0
   num_ctx: 8192
 
@@ -57,10 +57,10 @@ rag:
     enable: true
     strip_instructions: true # whether to remove instruction-like text from retrieved snippets to prevent prompt injection
     patterns:
-      - ".*(delete|format|shutdown|rm|del|erase).*" # simple regex patterns to block dangerous actions in retrieved docs, can be expanded for better coverage
+      - '.*(delete|format|shutdown|rm|del|erase).*' # simple regex patterns to block dangerous actions in retrieved docs, can be expanded for better coverage
     allowlist:
-      - ["zebra", "internal_kb"]
-      - ".*(restart|resume|clear).*" # allow certain actions that might be risky in general but are necessary for troubleshooting, with confirmation from validation specialist
+      - ['zebra', 'internal_kb']
+      - '.*(restart|resume|clear).*' # allow certain actions that might be risky in general but are necessary for troubleshooting, with confirmation from validation specialist
   tools:
     runner: rq # rq|celery|local
     rate_limits:
@@ -70,19 +70,19 @@ rag:
     redaction:
       enable: true
       patterns:
-        - ".*(password|secret|token|key).*" # regex patterns to identify sensitive information in tool outputs for redaction in the planner's view, can be expanded based on observed data
+        - '.*(password|secret|token|key).*' # regex patterns to identify sensitive information in tool outputs for redaction in the planner's view, can be expanded based on observed data
 
 confirmation:
   enable: true
   token_ttl: 900 # seconds that a confirmation token is valid for, can be adjusted based on expected response times and criticality of actions
   timeout: 30 # seconds to wait for confirmation from the validation specialist before assuming a negative response, can be adjusted based on expected response times and criticality of actions
   required_for:
-    ["destructive", "config_change", "firmware", "reboot"]
+    ['destructive', 'config_change', 'firmware', 'reboot']
     # list of actions that require explicit confirmation from the validation specialist before execution, can be expanded based on risk assessment of actions
 
 privilege_checks:
   require_admin_for:
-    ["windows.driver.*", "windows.port.*", "cups.queue.*", "device.firmware.*"]
+    ['windows.driver.*', 'windows.port.*', 'cups.queue.*', 'device.firmware.*']
   allow_elevation: false # never auto-elevate
 
 audit:
@@ -95,4 +95,4 @@ audit:
 sync:
   enabled: true
   mode: deferred #deferred|realtime
-  spool_dir: "data/sync/spool/"
+  spool_dir: 'data/sync/spool/'
