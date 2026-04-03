@@ -1,0 +1,4 @@
+model:
+  name: zt411-troubleshooter
+  embedding_model: sentence-transformers/all-MiniLM-L6-v2
+  max_steps: 10

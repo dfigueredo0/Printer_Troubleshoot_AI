@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import logging
 import re
-import shlex
 import socket
 import struct
 import subprocess
@@ -25,7 +24,7 @@ import time
 from collections import defaultdict, deque
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as _FuturesTimeout
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
@@ -35,7 +34,6 @@ _IS_WINDOWS = sys.platform == "win32"
 # ---------------------------------------------------------------------------
 # Core data structures
 # ---------------------------------------------------------------------------
-
 
 @dataclass
 class ToolResult:
@@ -47,7 +45,6 @@ class ToolResult:
     error: str = ""
     duration_ms: float = 0.0
 
-
 @dataclass
 class ToolSchema:
     name: str
@@ -55,11 +52,9 @@ class ToolSchema:
     rate_limit_key: str = "per_tool"   # "per_printer" | "per_tool"
     timeout: float = 30.0
 
-
 # ---------------------------------------------------------------------------
 # Rate limiter (sliding-window, in-process)
 # ---------------------------------------------------------------------------
-
 
 class RateLimiter:
     """Sliding-window rate limiter.
@@ -109,11 +104,9 @@ class RateLimiter:
         tq.append(now)
         return True
 
-
 # ---------------------------------------------------------------------------
 # Output redactor
 # ---------------------------------------------------------------------------
-
 
 class OutputRedactor:
     """Line-level regex redactor for sensitive data in tool output."""
@@ -144,11 +137,9 @@ class OutputRedactor:
             out.append(line)
         return "\n".join(out)
 
-
 # ---------------------------------------------------------------------------
 # Tool registry
 # ---------------------------------------------------------------------------
-
 
 class ToolRegistry:
     """Wraps tool functions with rate-limiting, timeout, and redaction."""
@@ -197,11 +188,9 @@ class ToolRegistry:
 
         return result
 
-
 # ---------------------------------------------------------------------------
 # ZT411 SNMP OID constants
 # ---------------------------------------------------------------------------
-
 
 class ZT411OIDs:
     """SNMP OID constants for the Zebra ZT411.
@@ -241,7 +230,6 @@ class ZT411OIDs:
     ZBR_RIBBON_OUT = "1.3.6.1.4.1.683.6.2.3.4.1.5.0"  # 1=yes
     ZBR_PAUSED = "1.3.6.1.4.1.683.6.2.3.4.1.7.0"      # 1=yes
     ZBR_ERROR_CODE = "1.3.6.1.4.1.683.6.2.1.3.0"
-
 
 # ---------------------------------------------------------------------------
 # Zebra error-code → KB citation mapping
@@ -300,7 +288,6 @@ _ZBR_ERROR_KB: Dict[str, Dict[str, str]] = {
     },
 }
 
-
 def map_error_code_to_kb(code: str) -> Dict[str, str]:
     """Return a KB citation dict for a given Zebra error code string.
 
@@ -318,11 +305,9 @@ def map_error_code_to_kb(code: str) -> Dict[str, str]:
         "doc_ref": "ZT411_OG_appendix",
     }
 
-
 # ---------------------------------------------------------------------------
 # Helper — run subprocess safely
 # ---------------------------------------------------------------------------
-
 
 def _run(
     cmd: List[str],
@@ -346,11 +331,9 @@ def _run(
     except Exception as exc:  # noqa: BLE001
         return -3, "", str(exc)
 
-
 # ===========================================================================
 # NETWORK TOOLS
 # ===========================================================================
-
 
 def ping(ip: str, timeout_s: float = 2.0, count: int = 1) -> ToolResult:
     """ICMP echo probe.  Returns output={'reachable': bool, 'latency_ms': float|None}."""
@@ -383,7 +366,6 @@ def ping(ip: str, timeout_s: float = 2.0, count: int = 1) -> ToolResult:
         raw=raw,
     )
 
-
 def tcp_connect(ip: str, port: int, timeout_s: float = 3.0) -> ToolResult:
     """TCP SYN probe — returns output={'open': bool}."""
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -400,7 +382,6 @@ def tcp_connect(ip: str, port: int, timeout_s: float = 3.0) -> ToolResult:
         except OSError:
             pass
 
-
 def dns_lookup(hostname: str) -> ToolResult:
     """Resolve hostname → IP.  Returns output={'ip': str, 'resolved': bool}."""
     try:
@@ -412,7 +393,6 @@ def dns_lookup(hostname: str) -> ToolResult:
             output={"ip": "", "resolved": False},
             error=str(exc),
         )
-
 
 def arp_lookup(ip: str) -> ToolResult:
     """Query the local ARP cache for a MAC address.
@@ -437,7 +417,6 @@ def arp_lookup(ip: str) -> ToolResult:
 
     return ToolResult(success=True, output={"mac": "", "found": False}, raw=raw)
 
-
 # OUI prefix → vendor (subset of common printer / network vendors)
 _OUI_TABLE: Dict[str, str] = {
     "00:07:4D": "Zebra Technologies",
@@ -455,7 +434,6 @@ _OUI_TABLE: Dict[str, str] = {
     "00:23:F8": "Cisco Systems",
 }
 
-
 def oui_vendor(mac: str) -> ToolResult:
     """Look up the vendor prefix of a MAC address.
 
@@ -466,25 +444,35 @@ def oui_vendor(mac: str) -> ToolResult:
     vendor = _OUI_TABLE.get(oui, "unknown")
     return ToolResult(success=True, output={"vendor": vendor, "oui": oui})
 
-
 # ---------------------------------------------------------------------------
 # SNMP helpers
 # ---------------------------------------------------------------------------
 
-
 def _snmp_available() -> bool:
     try:
-        import pysnmp  # noqa: F401
+        import pysnmp 
         return True
     except ImportError:
         return False
 
+def _parse_snmp_value(value: Any) -> Any:
+    if hasattr(value, "asOctets"):
+        raw_bytes = value.asOctets()
+        try:
+            return raw_bytes.decode("utf-8").strip("\x00").strip()
+        except UnicodeDecodeError:
+            return raw_bytes.hex()
+
+    try:
+        return int(value)
+    except Exception:  # noqa: BLE001
+        return str(value)
 
 def snmp_get(
     ip: str,
     oid: str,
     community: str = "public",
-    timeout_s: float = 5.0,
+    timeout_s: int = 5,
     port: int = 161,
 ) -> ToolResult:
     """SNMPv2c GET for a single OID.
@@ -496,10 +484,7 @@ def snmp_get(
         return ToolResult(success=False, error="pysnmp not installed")
 
     try:
-        from pysnmp.hlapi import (  # type: ignore[import]
-            CommunityData, ContextData, ObjectIdentity, ObjectType,
-            SnmpEngine, UdpTransportTarget, getCmd,
-        )
+        from pysnmp.hlapi import (CommunityData, ContextData, ObjectIdentity, ObjectType, SnmpEngine, UdpTransportTarget, getCmd)
     except ImportError:
         return ToolResult(success=False, error="pysnmp hlapi unavailable")
 
@@ -537,12 +522,11 @@ def snmp_get(
     except Exception as exc:  # noqa: BLE001
         return ToolResult(success=False, error=str(exc))
 
-
 def snmp_walk(
     ip: str,
     oid_prefix: str,
     community: str = "public",
-    timeout_s: float = 10.0,
+    timeout_s: int = 10,
     port: int = 161,
     max_rows: int = 50,
 ) -> ToolResult:
@@ -554,10 +538,7 @@ def snmp_walk(
         return ToolResult(success=False, error="pysnmp not installed")
 
     try:
-        from pysnmp.hlapi import (  # type: ignore[import]
-            CommunityData, ContextData, ObjectIdentity, ObjectType,
-            SnmpEngine, UdpTransportTarget, nextCmd,
-        )
+        from pysnmp.hlapi import (CommunityData, ContextData, ObjectIdentity, ObjectType, SnmpEngine, UdpTransportTarget, nextCmd)
     except ImportError:
         return ToolResult(success=False, error="pysnmp hlapi unavailable")
 
@@ -571,22 +552,20 @@ def snmp_walk(
             ObjectType(ObjectIdentity(oid_prefix)),
             lexicographicMode=False,
         ):
-            if errorIndication or errorStatus:
-                break
+            if errorIndication:
+                return ToolResult(success=False, error=str(errorIndication))
+            if errorStatus:
+                return ToolResult(
+                    success=False,
+                    error=f"{errorStatus.prettyPrint()} at {errorIndex}",
+                )
+
             for varBind in varBinds:
                 oid_str = str(varBind[0])
-                val = varBind[1]
-                if hasattr(val, "asOctets"):
-                    try:
-                        parsed = val.asOctets().decode("utf-8").strip("\x00").strip()
-                    except UnicodeDecodeError:
-                        parsed = val.asOctets().hex()
-                else:
-                    try:
-                        parsed = int(val)
-                    except Exception:  # noqa: BLE001
-                        parsed = str(val)
+                parsed = _parse_snmp_value(varBind[1])
+
                 rows.append({"oid": oid_str, "value": parsed})
+
             if len(rows) >= max_rows:
                 break
 
@@ -594,11 +573,9 @@ def snmp_walk(
     except Exception as exc:  # noqa: BLE001
         return ToolResult(success=False, error=str(exc))
 
-
 # ===========================================================================
 # DEVICE TOOLS  (ZT411-specific SNMP + IPP)
 # ===========================================================================
-
 
 def snmp_zt411_status(
     ip: str,
@@ -638,7 +615,6 @@ def snmp_zt411_status(
         return ToolResult(success=False, error="no SNMP response from device")
     return ToolResult(success=True, output=results)
 
-
 def snmp_zt411_physical_flags(
     ip: str,
     community: str = "public",
@@ -677,7 +653,6 @@ def snmp_zt411_physical_flags(
         return ToolResult(success=False, output=flags, error="Zebra enterprise OIDs not available")
     return ToolResult(success=True, output=flags)
 
-
 def snmp_zt411_consumables(
     ip: str,
     community: str = "public",
@@ -711,7 +686,6 @@ def snmp_zt411_consumables(
 
     return ToolResult(success=True, output={"consumables": consumables})
 
-
 def snmp_zt411_alerts(
     ip: str,
     community: str = "public",
@@ -737,7 +711,6 @@ def snmp_zt411_alerts(
             error_codes.append(code)
 
     return ToolResult(success=True, output={"alerts": alerts, "error_codes": error_codes})
-
 
 def ipp_get_attributes(ip: str, port: int = 631) -> ToolResult:
     """Read IPP printer attributes via GET-PRINTER-ATTRIBUTES request.
@@ -817,11 +790,9 @@ def ipp_get_attributes(ip: str, port: int = 631) -> ToolResult:
 
     return ToolResult(success=True, output={"attributes": attrs}, raw=repr(attrs))
 
-
 # ===========================================================================
 # WINDOWS TOOLS
 # ===========================================================================
-
 
 def _ps_run(
     command: str,
@@ -844,7 +815,6 @@ def _ps_run(
     if rc == 0:
         return ToolResult(success=True, output=stdout.strip(), raw=raw)
     return ToolResult(success=False, output=stdout.strip(), raw=raw, error=stderr.strip())
-
 
 def ps_query_spooler() -> ToolResult:
     """Query the Windows Print Spooler service status.
@@ -884,7 +854,6 @@ def ps_query_spooler() -> ToolResult:
             raw=raw_json,
         )
 
-
 def ps_enum_printers() -> ToolResult:
     """Enumerate Windows printers via Get-Printer.
 
@@ -922,7 +891,6 @@ def ps_enum_printers() -> ToolResult:
     except (_json.JSONDecodeError, TypeError) as exc:
         return ToolResult(success=False, error=str(exc), raw=r.raw)
 
-
 def ps_enum_jobs(queue_name: str) -> ToolResult:
     """Enumerate print jobs in a Windows queue.
 
@@ -958,7 +926,6 @@ def ps_enum_jobs(queue_name: str) -> ToolResult:
     except (_json.JSONDecodeError, TypeError) as exc:
         return ToolResult(success=False, error=str(exc), raw=r.raw)
 
-
 def ps_get_driver(queue_name: str) -> ToolResult:
     """Retrieve driver metadata for a Windows print queue.
 
@@ -992,7 +959,6 @@ def ps_get_driver(queue_name: str) -> ToolResult:
     except (_json.JSONDecodeError, TypeError) as exc:
         return ToolResult(success=False, error=str(exc), raw=r.raw)
 
-
 def ps_get_event_log(last_n: int = 50) -> ToolResult:
     """Read recent PrintService/Admin errors from the Windows event log.
 
@@ -1009,7 +975,6 @@ def ps_get_event_log(last_n: int = 50) -> ToolResult:
     if not errors and not r.success:
         return ToolResult(success=False, error=r.error, raw=r.raw)
     return ToolResult(success=True, output={"errors": errors}, raw=r.raw)
-
 
 def ps_restart_service(service_name: str) -> ToolResult:
     """Restart a Windows service by name.
@@ -1036,7 +1001,6 @@ def ps_restart_service(service_name: str) -> ToolResult:
         # Treat non-error exit as success
         return ToolResult(success=True, output={"restarted": True}, raw=r.raw)
 
-
 def ps_cancel_job(queue_name: str, job_id: int) -> ToolResult:
     """Cancel a specific print job by ID.
 
@@ -1051,7 +1015,6 @@ def ps_cancel_job(queue_name: str, job_id: int) -> ToolResult:
         error=r.error,
         raw=r.raw,
     )
-
 
 def ps_set_printer_online(queue_name: str) -> ToolResult:
     """Bring a Windows print queue back online.
@@ -1072,7 +1035,6 @@ def ps_set_printer_online(queue_name: str) -> ToolResult:
         raw=r.raw,
     )
 
-
 # ===========================================================================
 # CUPS TOOLS
 # ===========================================================================
@@ -1080,7 +1042,6 @@ def ps_set_printer_online(queue_name: str) -> ToolResult:
 def _cups_available() -> bool:
     rc, _, _ = _run(["which", "lpstat"], timeout=3.0)
     return rc == 0 or _run(["lpstat", "--help"], timeout=3.0)[0] in (0, 1)
-
 
 def lpstat_v() -> ToolResult:
     """Run lpstat -v to list CUPS printer queues and their device URIs.
@@ -1099,7 +1060,6 @@ def lpstat_v() -> ToolResult:
         return ToolResult(success=False, error=stderr.strip(), raw=raw)
     return ToolResult(success=True, output={"queues": queues}, raw=raw)
 
-
 def lpstat_p() -> ToolResult:
     """Run lpstat -p to get printer status (idle, processing, stopped).
 
@@ -1116,7 +1076,6 @@ def lpstat_p() -> ToolResult:
     if rc != 0 and not printers:
         return ToolResult(success=False, error=stderr.strip(), raw=raw)
     return ToolResult(success=True, output={"printers": printers}, raw=raw)
-
 
 def lpstat_jobs(queue_name: str) -> ToolResult:
     """Run lpstat -o <queue> to enumerate pending jobs.
@@ -1138,7 +1097,6 @@ def lpstat_jobs(queue_name: str) -> ToolResult:
     if rc not in (0,) and not jobs:
         return ToolResult(success=False, error=stderr.strip(), raw=raw)
     return ToolResult(success=True, output={"jobs": jobs}, raw=raw)
-
 
 def cups_error_log(n_lines: int = 100) -> ToolResult:
     """Read the last n_lines from the CUPS error_log.
@@ -1174,7 +1132,6 @@ def cups_error_log(n_lines: int = 100) -> ToolResult:
 
     return ToolResult(success=False, error="CUPS error_log not accessible", raw=stderr)
 
-
 def lpinfo_m() -> ToolResult:
     """Run lpinfo -m to list available PPD/driver models.
 
@@ -1191,7 +1148,6 @@ def lpinfo_m() -> ToolResult:
         return ToolResult(success=False, error=stderr.strip(), raw=raw)
     zebra_models = [m for m in models if "zebra" in m["description"].lower() or "zt" in m["description"].lower()]
     return ToolResult(success=True, output={"models": models, "zebra_models": zebra_models}, raw=raw)
-
 
 def lpoptions(queue_name: str) -> ToolResult:
     """Run lpoptions -p <queue> -l to list driver options and current values.
@@ -1212,7 +1168,6 @@ def lpoptions(queue_name: str) -> ToolResult:
         return ToolResult(success=False, error=stderr.strip(), raw=raw)
     return ToolResult(success=True, output={"options": options}, raw=raw)
 
-
 def cupsenable(queue_name: str) -> ToolResult:
     """Re-enable a stopped CUPS queue via cupsenable.
 
@@ -1226,7 +1181,6 @@ def cupsenable(queue_name: str) -> ToolResult:
         error=stderr.strip() if rc != 0 else "",
         raw=raw,
     )
-
 
 def restart_cups() -> ToolResult:
     """Restart the CUPS service via systemctl or launchctl.
@@ -1249,7 +1203,6 @@ def restart_cups() -> ToolResult:
     raw = stdout + stderr + stdout2 + stderr2
     return ToolResult(success=rc2 == 0, output={"restarted": rc2 == 0}, raw=raw)
 
-
 def test_print(queue_name: str, file_path: str = "/dev/null") -> ToolResult:
     """Send a test print job to a CUPS queue.
 
@@ -1271,7 +1224,6 @@ def test_print(queue_name: str, file_path: str = "/dev/null") -> ToolResult:
         error=stderr.strip() if rc != 0 else "",
         raw=raw,
     )
-
 
 # ===========================================================================
 # Default registry instance
@@ -1324,7 +1276,6 @@ def _build_default_registry() -> ToolRegistry:
         registry.register(schema, fn)
 
     return registry
-
 
 #: Module-level singleton registry — import and use directly in specialists.
 registry: ToolRegistry = _build_default_registry()

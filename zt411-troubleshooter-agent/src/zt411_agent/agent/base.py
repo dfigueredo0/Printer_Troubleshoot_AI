@@ -5,7 +5,7 @@ class Specialist(ABC):
     name: str
 
     @abstractmethod
-    def can_handle(self, state: Dict[str, Any]) -> float:
+    def can_handle(self, state: Any) -> float:
         """
         Return utility score (0.0–1.0) representing
         expected information gain / usefulness.
@@ -13,7 +13,7 @@ class Specialist(ABC):
         pass
 
     @abstractmethod
-    def act(self, state: Dict[str, Any]) -> Dict[str, Any]:
+    def act(self, state: Any) -> Dict[str, Any]:
         """
         Execute next step and return:
         {
