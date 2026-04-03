@@ -4,6 +4,14 @@ import logging
 from typing import Any
 
 from .base import Specialist
+from .tools import (
+    snmp_zt411_status,
+    snmp_zt411_physical_flags,
+    snmp_zt411_consumables,
+    snmp_zt411_alerts,
+    ipp_get_attributes,
+    map_error_code_to_kb,
+)
 from ..state import AgentState, ActionStatus, RiskLevel
 
 logger = logging.getLogger(__name__)
@@ -14,6 +22,7 @@ _DEVICE_KEYWORDS = {
     "error", "pause", "beep", "blink", "alert", "offline",
     "ready", "reset", "reboot",
 }
+
 
 class DeviceSpecialist(Specialist):
     """
@@ -87,74 +96,157 @@ class DeviceSpecialist(Specialist):
         return min(score, 1.0)
 
     def act(self, state: AgentState) -> dict[str, Any]:
-        """
-        Query the ZT411 via SNMP / IPP and update state.
-
-        Structured stub — TODO: replace each block with real pysnmp / httpx tool calls.
-        """
+        """Query the ZT411 via SNMP / IPP and update state."""
         logger.info("DeviceSpecialist acting on session %s", state.session_id)
 
         actions_taken: list[str] = []
         evidence_items: list[str] = []
-
         ip = state.device.ip
 
         # ------------------------------------------------------------------
-        # 1. SNMP status poll
+        # 1. SNMP status poll (model, firmware, serial, printer_status)
         # ------------------------------------------------------------------
         if state.device_unknown and ip != "unknown":
-            # TODO: real SNMP walk — prtGeneralPrinterStatus, hrDeviceStatus, etc.
-            placeholder = f"SNMP status poll {ip} — not yet implemented"
-            ev = state.add_evidence(
-                specialist=self.name,
-                source="snmp_status",
-                content=placeholder,
-            )
+            r = snmp_zt411_status(ip)
+            if r.success and r.output:
+                d = r.output
+                if d.get("zbr_model"):
+                    state.device.model = str(d["zbr_model"])
+                if d.get("zbr_firmware"):
+                    state.device.firmware_version = str(d["zbr_firmware"])
+                if d.get("printer_status"):
+                    state.device.printer_status = str(d["printer_status"])
+                content = (
+                    f"SNMP status {ip}: model='{d.get('zbr_model', '')}' "
+                    f"firmware='{d.get('zbr_firmware', '')}' "
+                    f"status='{d.get('printer_status', '')}' "
+                    f"sysDescr='{(d.get('sys_descr') or '')[:80]}'"
+                )
+            else:
+                content = f"SNMP status poll failed: {r.error}"
+            ev = state.add_evidence(specialist=self.name, source="snmp_status", content=content)
             evidence_items.append(ev.evidence_id)
             actions_taken.append("snmp status poll")
 
         # ------------------------------------------------------------------
-        # 2. SNMP consumables (ribbon %, media %)
+        # 2. SNMP physical flags (head_open, media_out, ribbon_out, paused)
+        # ------------------------------------------------------------------
+        if ip != "unknown" and any(
+            f is None for f in [
+                state.device.head_open,
+                state.device.media_out,
+                state.device.ribbon_out,
+                state.device.paused,
+            ]
+        ):
+            r = snmp_zt411_physical_flags(ip)
+            if r.success and r.output:
+                flags = r.output
+                state.device.head_open = flags.get("head_open")
+                state.device.media_out = flags.get("media_out")
+                state.device.ribbon_out = flags.get("ribbon_out")
+                state.device.paused = flags.get("paused")
+                active = [k for k, v in flags.items() if v is True]
+                content = (
+                    f"Physical flags {ip}: head_open={flags.get('head_open')} "
+                    f"media_out={flags.get('media_out')} "
+                    f"ribbon_out={flags.get('ribbon_out')} "
+                    f"paused={flags.get('paused')}"
+                    + (f" — ACTIVE: {active}" if active else "")
+                )
+            else:
+                # Zebra enterprise OIDs unavailable — note it but don't fail
+                content = f"Physical flags via Zebra OIDs not available ({r.error}); check via front panel"
+            ev = state.add_evidence(specialist=self.name, source="snmp_physical_flags", content=content)
+            evidence_items.append(ev.evidence_id)
+            actions_taken.append("snmp physical flags")
+
+        # ------------------------------------------------------------------
+        # 3. SNMP consumables (ribbon %, media %)
         # ------------------------------------------------------------------
         if ip != "unknown" and not state.device.consumables:
-            placeholder = f"SNMP consumables {ip} — not yet implemented"
-            ev = state.add_evidence(
-                specialist=self.name,
-                source="snmp_consumables",
-                content=placeholder,
-            )
+            r = snmp_zt411_consumables(ip)
+            if r.success and r.output:
+                consumables = r.output.get("consumables", [])
+                state.device.consumables = {c["name"]: c for c in consumables}
+                low = [c for c in consumables if 0 <= c.get("pct", 100) < 20]
+                content = (
+                    f"Consumables {ip}: "
+                    + "; ".join(
+                        f"{c['name']}={c['pct']:.0f}%" if c.get("pct", -1) >= 0 else c["name"]
+                        for c in consumables
+                    )
+                )
+                if low:
+                    content += f" — LOW: {[c['name'] for c in low]}"
+            else:
+                content = f"SNMP consumables read failed: {r.error}"
+            ev = state.add_evidence(specialist=self.name, source="snmp_consumables", content=content)
             evidence_items.append(ev.evidence_id)
             actions_taken.append("snmp consumables read")
 
         # ------------------------------------------------------------------
-        # 3. SNMP alerts / error OIDs
+        # 4. SNMP alerts / error codes
         # ------------------------------------------------------------------
         if ip != "unknown" and not state.device.error_codes:
-            placeholder = f"SNMP error codes / alerts {ip} — not yet implemented"
-            ev = state.add_evidence(
-                specialist=self.name,
-                source="snmp_alerts",
-                content=placeholder,
-            )
+            r = snmp_zt411_alerts(ip)
+            if r.success and r.output:
+                alerts = r.output.get("alerts", [])
+                error_codes = r.output.get("error_codes", [])
+                state.device.alerts = alerts
+                state.device.error_codes = error_codes
+                content = (
+                    f"SNMP alerts {ip}: {len(alerts)} alert(s) {alerts[:3]}; "
+                    f"error_codes={error_codes}"
+                )
+            else:
+                content = f"SNMP alerts read failed: {r.error}"
+            ev = state.add_evidence(specialist=self.name, source="snmp_alerts", content=content)
             evidence_items.append(ev.evidence_id)
             actions_taken.append("snmp alerts read")
 
         # ------------------------------------------------------------------
-        # 4. Error code → Zebra KB lookup (RAG)
+        # 5. IPP attribute read (secondary — fills gaps SNMP doesn't cover)
+        # ------------------------------------------------------------------
+        if ip != "unknown" and state.network.port_open.get(631):
+            r = ipp_get_attributes(ip, port=631)
+            if r.success and r.output:
+                attrs = r.output.get("attributes", {})
+                ipp_status = attrs.get("printer-state", "")
+                ipp_reason = attrs.get("printer-state-reasons", "")
+                if ipp_status and state.device.printer_status in ("unknown", ""):
+                    _ipp_state_map = {"3": "idle", "4": "printing", "5": "stopped"}
+                    state.device.printer_status = _ipp_state_map.get(str(ipp_status), str(ipp_status))
+                content = (
+                    f"IPP attributes {ip}:631 — state='{ipp_status}' reasons='{ipp_reason}' "
+                    f"({len(attrs)} attribute(s) returned)"
+                )
+            else:
+                content = f"IPP GET-PRINTER-ATTRIBUTES failed: {r.error}"
+            ev = state.add_evidence(specialist=self.name, source="ipp_attributes", content=content)
+            evidence_items.append(ev.evidence_id)
+            actions_taken.append("ipp get-printer-attributes")
+
+        # ------------------------------------------------------------------
+        # 6. Error code → Zebra KB citation mapper
         # ------------------------------------------------------------------
         for code in state.device.error_codes:
-            # TODO: trigger RAG lookup for this error code
-            placeholder = f"RAG KB lookup for error code {code} — not yet implemented"
+            kb = map_error_code_to_kb(code)
+            content = (
+                f"KB lookup error_code={code}: '{kb['title']}' — {kb['description']} "
+                f"(ref: {kb['doc_ref']})"
+            )
             ev = state.add_evidence(
                 specialist=self.name,
                 source="rag_error_kb",
-                content=placeholder,
+                content=content,
+                snippet_id=kb["doc_ref"],
             )
             evidence_items.append(ev.evidence_id)
             actions_taken.append(f"kb lookup error {code}")
 
         # ------------------------------------------------------------------
-        # 5. Physical action recommendations (if flags are set)
+        # 7. Physical action recommendations (if flags are set)
         # ------------------------------------------------------------------
         recommendations: list[str] = []
         if state.device.head_open:
@@ -164,7 +256,6 @@ class DeviceSpecialist(Specialist):
         if state.device.ribbon_out:
             recommendations.append("Replace ribbon and re-thread.")
         if state.device.paused:
-            # Resuming via SNMP SET or front panel — low risk
             recommendations.append("Resume printer (front panel or SNMP SET prtGeneralReset).")
             state.log_action(
                 specialist=self.name,

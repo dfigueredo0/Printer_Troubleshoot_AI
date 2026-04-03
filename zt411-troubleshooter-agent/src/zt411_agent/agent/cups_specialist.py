@@ -4,6 +4,17 @@ import logging
 from typing import Any
 
 from .base import Specialist
+from .tools import (
+    lpstat_v,
+    lpstat_p,
+    lpstat_jobs,
+    cups_error_log,
+    lpinfo_m,
+    lpoptions,
+    cupsenable,
+    restart_cups,
+    test_print,
+)
 from ..state import AgentState, ActionStatus, RiskLevel
 
 logger = logging.getLogger(__name__)
@@ -12,6 +23,7 @@ _CUPS_KEYWORDS = {
     "cups", "lpd", "ipp", "ppd", "filter", "backend", "queue",
     "spooler", "driver", "job", "stuck", "pending",
 }
+
 
 class CUPSSpecialist(Specialist):
     """
@@ -40,7 +52,6 @@ class CUPSSpecialist(Specialist):
 
         # Gate: Windows makes CUPS very unlikely (but not impossible — WSL etc.)
         if state.os_is_windows:
-            # Give a small floor in case someone mentions CUPS explicitly
             if any(k in " ".join(state.symptoms + [state.user_description]).lower() for k in _CUPS_KEYWORDS):
                 return 0.15
             return 0.02
@@ -77,7 +88,6 @@ class CUPSSpecialist(Specialist):
         # --- Diminishing returns ---
 
         if self.name in state.visited_specialists:
-            # Already checked; only stay relevant if queue still broken
             if state.cups.queue_state in {"stopped", "error"} or state.cups.pending_jobs > 0:
                 score *= 0.6
             else:
@@ -86,41 +96,61 @@ class CUPSSpecialist(Specialist):
         return min(score, 1.0)
 
     def act(self, state: AgentState) -> dict[str, Any]:
-        """
-        Inspect CUPS queue/jobs and attempt low-risk fixes.
-
-        Structured stub — replace each block with real subprocess / lpstat calls.
-        """
+        """Inspect CUPS queue/jobs and attempt low-risk fixes."""
         logger.info("CUPSSpecialist acting on session %s", state.session_id)
 
         actions_taken: list[str] = []
         evidence_items: list[str] = []
 
         # ------------------------------------------------------------------
-        # 1. List queues (lpstat -v / lpstat -p)
+        # 1. List queues (lpstat -v) and their status (lpstat -p)
         # ------------------------------------------------------------------
         if not state.cups.queue_name:
-            # TODO: subprocess.run(["lpstat", "-v"])
-            placeholder = "lpstat -v output — not yet implemented"
-            ev = state.add_evidence(
-                specialist=self.name,
-                source="lpstat_v",
-                content=placeholder,
+            r_v = lpstat_v()
+            r_p = lpstat_p()
+
+            if r_v.success and r_v.output:
+                queues = r_v.output.get("queues", [])
+                # Prefer queue whose device_uri looks like a Zebra / ZT411 device
+                chosen = next(
+                    (q for q in queues if "zt" in q["name"].lower() or "zebra" in q["device_uri"].lower()),
+                    queues[0] if queues else None,
+                )
+                if chosen:
+                    state.cups.queue_name = chosen["name"]
+                    state.cups.device_uri = chosen["device_uri"]
+
+            if r_p.success and r_p.output and state.cups.queue_name:
+                printers = r_p.output.get("printers", [])
+                for p in printers:
+                    if p["name"] == state.cups.queue_name:
+                        state.cups.queue_state = p["state"]
+                        break
+
+            content = (
+                f"lpstat -v: {len((r_v.output or {}).get('queues', []))} queue(s); "
+                f"selected='{state.cups.queue_name}' uri='{state.cups.device_uri}' "
+                f"state='{state.cups.queue_state}'"
             )
+            ev = state.add_evidence(specialist=self.name, source="lpstat_v", content=content)
             evidence_items.append(ev.evidence_id)
-            actions_taken.append("lpstat -v")
+            actions_taken.append("lpstat -v / lpstat -p")
 
         # ------------------------------------------------------------------
         # 2. Job list for the queue
         # ------------------------------------------------------------------
         if state.cups.queue_name:
-            # TODO: subprocess.run(["lpstat", "-o", state.cups.queue_name])
-            placeholder = f"lpstat -o {state.cups.queue_name} — not yet implemented"
-            ev = state.add_evidence(
-                specialist=self.name,
-                source="lpstat_jobs",
-                content=placeholder,
-            )
+            r = lpstat_jobs(state.cups.queue_name)
+            if r.success and r.output:
+                jobs = r.output.get("jobs", [])
+                state.cups.pending_jobs = len(jobs)
+                job_summary = (
+                    "; ".join(f"id={j['id']} user={j['user']}" for j in jobs[:5]) or "no jobs"
+                )
+                content = f"lpstat -o '{state.cups.queue_name}': {len(jobs)} job(s) — {job_summary}"
+            else:
+                content = f"lpstat -o failed: {r.error}"
+            ev = state.add_evidence(specialist=self.name, source="lpstat_jobs", content=content)
             evidence_items.append(ev.evidence_id)
             actions_taken.append("lpstat -o queue")
 
@@ -128,32 +158,54 @@ class CUPSSpecialist(Specialist):
         # 3. CUPS error_log tail
         # ------------------------------------------------------------------
         if not state.cups.last_error_log:
-            # TODO: read /var/log/cups/error_log (last N lines)
-            placeholder = "tail /var/log/cups/error_log — not yet implemented"
-            ev = state.add_evidence(
-                specialist=self.name,
-                source="cups_error_log",
-                content=placeholder,
-            )
+            r = cups_error_log(n_lines=100)
+            if r.success and r.output:
+                filter_errors = r.output.get("filter_errors", [])
+                state.cups.filter_errors = filter_errors[:20]
+                # Store last N lines as the error log snapshot
+                state.cups.last_error_log = "\n".join(r.output.get("lines", [])[-20:])
+                content = (
+                    f"CUPS error_log: {len(r.output.get('lines', []))} lines read; "
+                    f"{len(filter_errors)} error/warning line(s)"
+                )
+                if filter_errors:
+                    content += " — " + filter_errors[0]
+            else:
+                content = f"error_log read failed: {r.error}"
+            ev = state.add_evidence(specialist=self.name, source="cups_error_log", content=content)
             evidence_items.append(ev.evidence_id)
             actions_taken.append("read cups error_log")
 
         # ------------------------------------------------------------------
-        # 4. PPD / driver validation
+        # 4. PPD / driver validation (lpinfo -m + lpoptions)
         # ------------------------------------------------------------------
         if state.cups.queue_name and state.cups.ppd_valid is None:
-            # TODO: lpinfo -m | grep Zebra; lpoptions -p <queue> -l
-            placeholder = f"PPD/driver check for {state.cups.queue_name} — not yet implemented"
-            ev = state.add_evidence(
-                specialist=self.name,
-                source="ppd_check",
-                content=placeholder,
+            r_lpinfo = lpinfo_m()
+            r_lpopts = lpoptions(state.cups.queue_name)
+
+            zebra_models = (r_lpinfo.output or {}).get("zebra_models", []) if r_lpinfo.success else []
+            opts = (r_lpopts.output or {}).get("options", {}) if r_lpopts.success else {}
+
+            # Mark PPD valid if the driver name references Zebra or ZPL
+            driver_name = state.cups.driver_name or ""
+            ppd_ok = bool(
+                zebra_models
+                or "zebra" in driver_name.lower()
+                or "zpl" in driver_name.lower()
+                or opts
             )
+            state.cups.ppd_valid = ppd_ok
+
+            content = (
+                f"PPD/driver check: zebra_models={len(zebra_models)} "
+                f"lpoptions={len(opts)} ppd_valid={ppd_ok}"
+            )
+            ev = state.add_evidence(specialist=self.name, source="ppd_check", content=content)
             evidence_items.append(ev.evidence_id)
-            actions_taken.append("ppd validation")
+            actions_taken.append("ppd validation (lpinfo -m + lpoptions)")
 
         # ------------------------------------------------------------------
-        # 5. Re-enable a stopped queue (low risk — no confirmation needed)
+        # 5. Re-enable a stopped queue (requires confirmation)
         # ------------------------------------------------------------------
         if state.cups.queue_state == "stopped" and state.cups.queue_name:
             entry = state.log_action(
@@ -173,7 +225,7 @@ class CUPSSpecialist(Specialist):
             actions_taken.append(f"propose cupsenable (token={token})")
 
         # ------------------------------------------------------------------
-        # 6. CUPS service restart (requires confirmation)
+        # 6. CUPS service restart if filter errors present (requires confirmation)
         # ------------------------------------------------------------------
         if state.cups.filter_errors and state.cups.queue_name:
             entry = state.log_action(
@@ -191,6 +243,31 @@ class CUPSSpecialist(Specialist):
             )
             evidence_items.append(ev.evidence_id)
             actions_taken.append(f"propose cups restart (token={token})")
+
+        # ------------------------------------------------------------------
+        # 7. Test print (only if queue is idle and no pending jobs)
+        # ------------------------------------------------------------------
+        if (
+            state.cups.queue_name
+            and state.cups.queue_state == "idle"
+            and state.cups.pending_jobs == 0
+            and self.name in state.visited_specialists  # second visit — queue looks clean, verify
+        ):
+            entry = state.log_action(
+                specialist=self.name,
+                action=f"lp -d {state.cups.queue_name} /dev/null (test print)",
+                risk=RiskLevel.LOW,
+                status=ActionStatus.PENDING,
+                result="Pending confirmation",
+            )
+            token = state.issue_confirmation_token(entry.entry_id)
+            ev = state.add_evidence(
+                specialist=self.name,
+                source="proposed_fix",
+                content=f"Queue idle and clean — propose test print to verify. Token: {token}",
+            )
+            evidence_items.append(ev.evidence_id)
+            actions_taken.append(f"propose test print (token={token})")
 
         state.log_action(
             specialist=self.name,
