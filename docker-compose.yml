@@ -1,0 +1,97 @@
+version: '3.9'
+
+# ---------------------------------------------------------------------------
+# ZT411 Troubleshooter — full stack
+#
+# Default services: postgres, api, frontend
+# Optional:  docker compose --profile with-ollama up
+# ---------------------------------------------------------------------------
+
+services:
+  # --------------------------------------------------------------------------
+  # PostgreSQL 16
+  # --------------------------------------------------------------------------
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: zt411
+      POSTGRES_USER: zt411
+      POSTGRES_PASSWORD: '${POSTGRES_PASSWORD:-zt411}'
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - '5433:5432'
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U zt411 -d zt411']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # --------------------------------------------------------------------------
+  # Python / FastAPI agent service
+  # --------------------------------------------------------------------------
+  api:
+    build:
+      context: ./zt411-troubleshooter-agent
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: 'postgresql://zt411:${POSTGRES_PASSWORD:-zt411}@db:5432/zt411'
+      USE_DB: 'true'
+      ANTHROPIC_API_KEY: '${ANTHROPIC_API_KEY:-}'
+      OLLAMA_HOST: 'http://ollama:11434'
+    ports:
+      - '8000:8000'
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./zt411-troubleshooter-agent/data:/app/data
+      - ./zt411-troubleshooter-agent/configs:/app/configs
+      - rag_cache:/app/data/rag/cache
+    healthcheck:
+      test: ['CMD-SHELL', 'curl -sf http://localhost:8000/health || exit 1']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  # --------------------------------------------------------------------------
+  # Next.js frontend
+  # --------------------------------------------------------------------------
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      NEXT_PUBLIC_API_URL: 'http://localhost:8000'
+    ports:
+      - '3000:3000'
+    depends_on:
+      api:
+        condition: service_healthy
+
+  # --------------------------------------------------------------------------
+  # Ollama — local LLM (tier-1 planner)
+  # Activate with: docker compose --profile with-ollama up
+  # --------------------------------------------------------------------------
+  ollama:
+    image: ollama/ollama:latest
+    profiles: ['with-ollama']
+    restart: unless-stopped
+    ports:
+      - '11434:11434'
+    volumes:
+      - ollama_models:/root/.ollama
+    healthcheck:
+      test: ['CMD-SHELL', 'curl -sf http://localhost:11434/api/tags || exit 1']
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  pgdata:
+  rag_cache:
+  ollama_models:
