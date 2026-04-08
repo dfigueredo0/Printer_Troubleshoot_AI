@@ -77,6 +77,27 @@ class SampleCase:
             "risk_class": self.risk_class,
         }
 
+    def build_input_text(self) -> str:
+        """
+        Build the text string that gets embedded for classification.
+
+        Combines multiple fields so the model has richer signal than just
+        description + symptoms.  This is the single source of truth used
+        by both train.py and eval.py.
+        """
+        parts = [self.description]
+        if self.symptoms:
+            parts.append("Symptoms: " + ", ".join(self.symptoms))
+        if self.os_platform and self.os_platform != "unknown":
+            parts.append(f"OS: {self.os_platform}")
+        if self.expected_actions:
+            parts.append("Actions: " + ", ".join(self.expected_actions))
+        if self.risk_class and self.risk_class != "safe":
+            parts.append(f"Risk: {self.risk_class}")
+        if self.resolution_notes:
+            parts.append(f"Resolution: {self.resolution_notes}")
+        return " | ".join(parts)
+
 
 # ---------------------------------------------------------------------------
 # Dataset

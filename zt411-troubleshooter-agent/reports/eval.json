@@ -1,0 +1,79 @@
+{
+  "num_cases": 504,
+  "accuracy": 0.998,
+  "macro_f1": 0.9979,
+  "per_domain": {
+    "network": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0
+    },
+    "device": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0
+    },
+    "windows": {
+      "precision": 0.989,
+      "recall": 1.0,
+      "f1": 0.9945
+    },
+    "cups": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0
+    },
+    "validation": {
+      "precision": 1.0,
+      "recall": 0.99,
+      "f1": 0.995
+    }
+  },
+  "mode": "classifier (val split)",
+  "confusion_matrix": {
+    "labels": [
+      "network",
+      "device",
+      "windows",
+      "cups",
+      "validation"
+    ],
+    "matrix": [
+      [
+        102,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        112,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        90,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        100,
+        0
+      ],
+      [
+        0,
+        0,
+        1,
+        0,
+        99
+      ]
+    ]
+  }
+}

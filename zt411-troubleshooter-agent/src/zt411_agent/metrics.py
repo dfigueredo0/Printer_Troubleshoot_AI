@@ -75,6 +75,80 @@ def compute_precision_recall_f1(
 
 
 # ---------------------------------------------------------------------------
+# Confusion matrix
+# ---------------------------------------------------------------------------
+
+
+def compute_confusion_matrix(
+    y_true: Sequence[int],
+    y_pred: Sequence[int],
+    labels: Sequence[int] | None = None,
+) -> list[list[int]]:
+    """
+    Build an NxN confusion matrix where rows are true labels and columns
+    are predicted labels.
+
+    Parameters
+    ----------
+    y_true : Ground-truth integer labels.
+    y_pred : Predicted integer labels.
+    labels : Ordered list of label indices.  If None, derived from the union
+             of y_true and y_pred.
+
+    Returns
+    -------
+    list[list[int]] — matrix[i][j] = count of samples with true=labels[i],
+                      predicted=labels[j].
+    """
+    if len(y_true) != len(y_pred):
+        raise ValueError("y_true and y_pred must have the same length")
+
+    if labels is None:
+        labels = sorted(set(y_true) | set(y_pred))
+
+    label_to_idx = {lab: i for i, lab in enumerate(labels)}
+    n = len(labels)
+    matrix: list[list[int]] = [[0] * n for _ in range(n)]
+
+    for t, p in zip(y_true, y_pred):
+        if t in label_to_idx and p in label_to_idx:
+            matrix[label_to_idx[t]][label_to_idx[p]] += 1
+
+    return matrix
+
+
+def format_confusion_matrix(
+    matrix: list[list[int]],
+    label_names: Sequence[str],
+) -> str:
+    """
+    Return a human-readable string representation of a confusion matrix.
+
+    Rows = true, columns = predicted.
+    """
+    n = len(label_names)
+    # Column width: max of label length and widest number
+    max_count = max(max(row) for row in matrix) if matrix else 0
+    num_width = max(len(str(max_count)), 5)
+    label_width = max(len(name) for name in label_names)
+    col_width = max(num_width, label_width) + 1
+
+    lines = []
+    # Header
+    header = " " * (label_width + 2) + "".join(name.rjust(col_width) for name in label_names)
+    lines.append("Confusion Matrix (rows=true, cols=predicted):")
+    lines.append(header)
+    lines.append(" " * (label_width + 2) + "-" * (col_width * n))
+
+    # Rows
+    for i, name in enumerate(label_names):
+        row_str = "".join(str(v).rjust(col_width) for v in matrix[i])
+        lines.append(f"{name.rjust(label_width)} |{row_str}")
+
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
 # Agentic / session-level metrics
 # ---------------------------------------------------------------------------
 
