@@ -34,7 +34,7 @@ llm:
 
 ollama:
   host: 'http://localhost:11434' # Ollama server URL, adjust if your Ollama instance is running elsewhere
-  model: 'granite4' # granite4|glm-5|lfm2
+  model: 'granite4:1b-h' # granite4:1b-h|llama3.2|glm-5|lfm2
   temperature: 0.0
   num_ctx: 8192
 
