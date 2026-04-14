@@ -26,8 +26,8 @@ from pathlib import Path
 # Make sure the src package is importable when run from project root
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from src.zt411_agent.data.make_dataset import ingest
-from src.zt411_agent.agent.rag import RAGPipeline
+from zt411_agent.data.make_dataset import ingest
+from zt411_agent.agent.rag import RAGPipeline
 
 logging.basicConfig(
     level=logging.INFO,

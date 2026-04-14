@@ -40,9 +40,7 @@ ollama:
 
 rag:
   mode: local # local|remote|hybrid
-  embedding_model:
-    sentence-transformers/all-MiniLM-L6-v2
-    # should match the embedding model used for the vector store; check diff btwn (BAAI/bge-base-en-v1.5)
+  embedding_model: sentence-transformers/all-MiniLM-L6-v2 # should match the embedding model used for the vector store; check diff btwn (BAAI/bge-base-en-v1.5)
   faiss_index_path: data/rag/faiss.index
   docstore_path: data/rag/docstore.sqlite
   top_k: 6 # number of relevant snippets to retrieve for grounding the planner's decisions
