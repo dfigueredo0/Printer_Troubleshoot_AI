@@ -10,6 +10,9 @@ which specialist domain should handle the case.
 The classifier and train/val split indices are saved to data/cache/classifier.pkl
 so eval.py can evaluate on the exact held-out set.
 
+Per-epoch history (train_loss, val_loss, train_acc, val_acc) is written to
+reports/train_history.json and rendered as reports/train_history.png.
+
 Usage:
     python -m zt411_agent.train
 """
@@ -23,6 +26,7 @@ import numpy as np
 import mlflow
 
 from .data.dataset import TroubleshootingDataset
+from .metrics import plot_training_history
 from .models.baseline import BaselineModel
 from .settings import Settings
 
@@ -44,6 +48,16 @@ def set_seed(seed: int):
 def softmax(logits: np.ndarray) -> np.ndarray:
     exp = np.exp(logits - logits.max(axis=1, keepdims=True))
     return exp / exp.sum(axis=1, keepdims=True)
+
+
+def _cross_entropy(X: np.ndarray, y: np.ndarray, W: np.ndarray, b: np.ndarray) -> float:
+    """Mean cross-entropy loss for a dataset against the current (W, b)."""
+    if len(X) == 0:
+        return 0.0
+    logits = X @ W + b
+    probs = softmax(logits)
+    ce = -np.log(probs[np.arange(len(y)), y] + 1e-9)
+    return float(ce.mean())
 
 
 def main():
@@ -119,6 +133,16 @@ def main():
     epochs_without_improvement = 0
     lr = lr_init
 
+    # Per-epoch history for plotting / post-hoc analysis
+    history: dict[str, list[float]] = {
+        "epoch": [],
+        "train_loss": [],
+        "val_loss": [],
+        "train_acc": [],
+        "val_acc": [],
+        "lr": [],
+    }
+
     for epoch in range(1, epochs + 1):
         perm = list(range(len(X_train)))
         random.shuffle(perm)
@@ -156,7 +180,8 @@ def main():
 
         avg_loss = epoch_loss / max(num_batches, 1)
 
-        # Validation accuracy
+        # Validation loss + accuracy
+        val_loss = _cross_entropy(X_val, y_val, W, b) if len(X_val) > 0 else 0.0
         val_logits = X_val @ W + b
         val_preds = val_logits.argmax(axis=1)
         val_acc = (val_preds == y_val).mean() if len(y_val) > 0 else 0.0
@@ -165,15 +190,23 @@ def main():
         train_preds = train_logits.argmax(axis=1)
         train_acc = (train_preds == y_train).mean()
 
+        history["epoch"].append(epoch)
+        history["train_loss"].append(float(avg_loss))
+        history["val_loss"].append(float(val_loss))
+        history["train_acc"].append(float(train_acc))
+        history["val_acc"].append(float(val_acc))
+        history["lr"].append(float(lr))
+
         print(
             f"  Epoch {epoch:3d}/{epochs}  "
-            f"loss={avg_loss:.4f}  train_acc={train_acc:.4f}  "
-            f"val_acc={val_acc:.4f}  lr={lr:.4f}"
+            f"loss={avg_loss:.4f}  val_loss={val_loss:.4f}  "
+            f"train_acc={train_acc:.4f}  val_acc={val_acc:.4f}  lr={lr:.4f}"
         )
 
         if cfg.train.mlflow:
             mlflow.log_metrics({
                 "loss": float(avg_loss),
+                "val_loss": float(val_loss),
                 "train_acc": float(train_acc),
                 "val_acc": float(val_acc),
                 "lr": lr,
@@ -228,6 +261,29 @@ def main():
         pickle.dump(classifier, f)
 
     print(f"\nTraining complete. Classifier saved to {classifier_path}")
+
+    # ---- Save training history + render plot -------------------------------
+    reports_dir = Path("reports")
+    reports_dir.mkdir(parents=True, exist_ok=True)
+
+    history_path = reports_dir / "train_history.json"
+    with open(history_path, "w") as f:
+        json.dump(history, f, indent=2)
+    print(f"Training history saved to {history_path}")
+
+    try:
+        plot_path = plot_training_history(
+            history,
+            reports_dir / "train_history.png",
+            title="Training History — train/val loss and accuracy",
+        )
+        print(f"Training plot saved to {plot_path}")
+        if cfg.train.mlflow:
+            mlflow.log_artifact(str(plot_path))
+            mlflow.log_artifact(str(history_path))
+    except RuntimeError as exc:
+        # matplotlib missing — don't fail training over a plot.
+        print(f"Skipped training plot: {exc}")
 
     if cfg.train.mlflow:
         mlflow.end_run()

@@ -9,6 +9,11 @@ Two evaluation modes:
   2. Centroid mode (--centroid): uses cosine similarity to domain centroids
      as a zero-shot baseline.  Evaluates on the full dataset.
 
+Writes to reports/:
+  * eval.json                  — numeric results + confusion matrix
+  * confusion_matrix.png       — row-normalized confusion matrix heatmap
+  * per_domain_f1.png          — precision/recall/F1 bar chart per domain
+
 Usage:
     python -m zt411_agent.eval              # classifier on held-out val split
     python -m zt411_agent.eval --centroid   # zero-shot centroid baseline
@@ -29,6 +34,8 @@ from .metrics import (
     compute_confusion_matrix,
     compute_precision_recall_f1,
     format_confusion_matrix,
+    plot_normalized_confusion_matrix,
+    plot_per_domain_f1,
 )
 from .models.baseline import BaselineModel
 from .settings import Settings
@@ -186,6 +193,32 @@ def main():
     print()
     print(format_confusion_matrix(cm, domain_names))
     print(f"\nReport saved to {out_path}")
+
+    # ---- Plots -------------------------------------------------------------
+    # Tag filenames with mode so classifier-vs-centroid runs don't overwrite
+    # each other.
+    mode_slug = mode.split()[0]  # "classifier" or "centroid"
+
+    try:
+        cm_path = plot_normalized_confusion_matrix(
+            cm,
+            domain_names,
+            out_dir / f"confusion_matrix_{mode_slug}.png",
+            title=f"Normalized Confusion Matrix — {mode}",
+        )
+        print(f"Confusion matrix plot saved to {cm_path}")
+    except RuntimeError as exc:
+        print(f"Skipped confusion matrix plot: {exc}")
+
+    try:
+        f1_path = plot_per_domain_f1(
+            results["per_domain"],
+            out_dir / f"per_domain_f1_{mode_slug}.png",
+            title=f"Per-Domain F1 — {mode}",
+        )
+        print(f"F1 plot saved to {f1_path}")
+    except RuntimeError as exc:
+        print(f"Skipped F1 plot: {exc}")
 
 
 if __name__ == "__main__":
