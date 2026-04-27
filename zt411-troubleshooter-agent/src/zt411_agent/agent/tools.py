@@ -196,7 +196,7 @@ class ZT411OIDs:
     """SNMP OID constants for the Zebra ZT411.
 
     Standard Printer-MIB (RFC 3805) OIDs work on all SNMP-capable Zebra
-    printers.  Zebra enterprise OIDs (1.3.6.1.4.1.683.*) are ZT-series
+    printers.  Zebra enterprise OIDs (1.3.6.1.4.1.10642.*) are ZT-series
     specific; availability depends on firmware version.
     """
 
@@ -222,14 +222,14 @@ class ZT411OIDs:
     PRT_MARKER_SUPPLIES_MAX_TABLE = "1.3.6.1.2.1.43.11.1.1.8"    # walk
 
     # Zebra enterprise (1.3.6.1.4.1.683) — ZT-series / Link-OS
-    ZBR_MODEL = "1.3.6.1.4.1.683.6.2.3.2.1.1.0"
-    ZBR_FIRMWARE = "1.3.6.1.4.1.683.6.2.3.2.1.5.0"
-    ZBR_SERIAL = "1.3.6.1.4.1.683.6.2.3.2.1.8.0"
-    ZBR_MEDIA_OUT = "1.3.6.1.4.1.683.6.2.3.4.1.3.0"   # 1=yes
-    ZBR_HEAD_OPEN = "1.3.6.1.4.1.683.6.2.3.4.1.4.0"   # 1=yes
-    ZBR_RIBBON_OUT = "1.3.6.1.4.1.683.6.2.3.4.1.5.0"  # 1=yes
-    ZBR_PAUSED = "1.3.6.1.4.1.683.6.2.3.4.1.7.0"      # 1=yes
-    ZBR_ERROR_CODE = "1.3.6.1.4.1.683.6.2.1.3.0"
+    ZBR_MODEL = "1.3.6.1.4.1.10642.6.2.3.2.1.1.0"
+    ZBR_FIRMWARE = "1.3.6.1.4.1.10642.6.2.3.2.1.5.0"
+    ZBR_SERIAL = "1.3.6.1.4.1.10642.6.2.3.2.1.8.0"
+    ZBR_MEDIA_OUT = "1.3.6.1.4.1.10642.6.2.3.4.1.3.0"   # 1=yes
+    ZBR_HEAD_OPEN = "1.3.6.1.4.1.10642.6.2.3.4.1.4.0"   # 1=yes
+    ZBR_RIBBON_OUT = "1.3.6.1.4.1.10642.6.2.3.4.1.5.0"  # 1=yes
+    ZBR_PAUSED = "1.3.6.1.4.1.10642.6.2.3.4.1.7.0"      # 1=yes
+    ZBR_ERROR_CODE = "1.3.6.1.4.1.10642.6.2.1.3.0"
 
 # ---------------------------------------------------------------------------
 # Zebra error-code → KB citation mapping
