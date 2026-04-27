@@ -723,27 +723,58 @@ def snmp_zt411_alerts(
     ip: str,
     community: str = "public",
 ) -> ToolResult:
-    """Walk the Printer-MIB alert table for active alerts.
+    """Query Zebra-specific alert/error sources.
 
-    Returns output={'alerts': [str], 'error_codes': [str]}
+    Returns output={'alerts': [str], 'error_codes': [str], 'sources_queried': [str]}.
+    success=True only if at least one source returned a usable response.
+    
+    NOTE: This printer does NOT implement the standard Printer-MIB
+    (1.3.6.1.2.1.43.*), so prtAlertDescription is not queried. The
+    Zebra enterprise alert subtree under 1.3.6.1.4.1.10642 has not yet
+    been fully mapped on this firmware (V92.21.39Z); the OIDs probed
+    below are best-effort.
+    
+    For authoritative printer state on this hardware, prefer
+    ipp_get_attributes() and read 'printer-state' / 'printer-state-reasons'.
     """
-    r = snmp_walk(ip, ZT411OIDs.PRT_ALERT_DESCR, community)
     alerts: List[str] = []
-    if r.success and r.output:
-        for row in r.output.get("rows", []):
-            val = str(row.get("value", "")).strip()
-            if val:
-                alerts.append(val)
-
-    # Also try Zebra enterprise error code
     error_codes: List[str] = []
+    sources_queried: List[str] = []
+    any_source_responded = False
+
+    # Try the Zebra error-code OID (10642.2.3.4.1.0).
+    # Currently observed to read 0 even during active errors —
+    # may not be the right OID for this firmware, but harmless to probe.
     ec_r = snmp_get(ip, ZT411OIDs.ZBR_ERROR_CODE, community)
+    sources_queried.append("ZBR_ERROR_CODE")
     if ec_r.success and ec_r.output:
+        any_source_responded = True
         code = str(ec_r.output.get("value", "")).strip()
         if code and code not in ("0", ""):
             error_codes.append(code)
 
-    return ToolResult(success=True, output={"alerts": alerts, "error_codes": error_codes})
+    # Try the Zebra error-text OID (10642.2.3.4.2.0).
+    et_r = snmp_get(ip, ZT411OIDs.ZBR_ERROR_TEXT, community)
+    sources_queried.append("ZBR_ERROR_TEXT")
+    if et_r.success and et_r.output:
+        any_source_responded = True
+        text = str(et_r.output.get("value", "")).strip()
+        if text:
+            alerts.append(text)
+
+    if not any_source_responded:
+        return ToolResult(
+            success=False,
+            output={"alerts": alerts, "error_codes": error_codes,
+                    "sources_queried": sources_queried},
+            error="no Zebra alert source responded; try IPP printer-state-reasons instead",
+        )
+
+    return ToolResult(
+        success=True,
+        output={"alerts": alerts, "error_codes": error_codes,
+                "sources_queried": sources_queried},
+    )
 
 def ipp_get_attributes(ip: str, port: int = 631) -> ToolResult:
     """Read IPP printer attributes via GET-PRINTER-ATTRIBUTES request.
