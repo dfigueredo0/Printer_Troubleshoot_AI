@@ -478,7 +478,7 @@ def snmp_get(
     """SNMPv2c GET for a single OID.
 
     Returns output={'value': <parsed>} or error on failure.
-    Requires pysnmp ≥ 4.x.
+    Requires pysnmp ≥ 7.x (uses async API under the hood).
     """
     import asyncio
 
@@ -486,43 +486,54 @@ def snmp_get(
         return ToolResult(success=False, error="pysnmp not installed")
 
     try:
-        from pysnmp.hlapi.v3arch.asyncio import (CommunityData, ContextData, ObjectIdentity, ObjectType, SnmpEngine, UdpTransportTarget, get_cmd)
+        from pysnmp.hlapi.v3arch.asyncio import (
+            CommunityData,
+            ContextData,
+            ObjectIdentity,
+            ObjectType,
+            SnmpEngine,
+            UdpTransportTarget,
+            get_cmd,
+        )
     except ImportError:
         return ToolResult(success=False, error="pysnmp hlapi unavailable")
 
     async def _do_get():
-	transport = await UdpTransportTarget.create(
-		(ip, port), timeout=timeout_s, retries-1
-	)
-	return await get_cmd(
-		SnmpEngine(),
-		CommunityData(community, mpModel=1)
-		transport,
-		ContextData(),
-		ObjectType(ObjectIdentity(oid)),
-	)
+        transport = await UdpTransportTarget.create(
+            (ip, port), timeout=timeout_s, retries=1
+        )
+        return await get_cmd(
+            SnmpEngine(),
+            CommunityData(community, mpModel=1),
+            transport,
+            ContextData(),
+            ObjectType(ObjectIdentity(oid)),
+        )
 
     try:
-	errorIndication, errorStatus, errorIndex, varBinds = asyncio.run(_do_get())
-        
-	if errorIndication:
-		return ToolResult(success=False, error=str(errorIndication))
-	if errorStatus:
-		return ToolResult(
-			success=False,
-			error=f"SNMP error {errorStatus.prettyPrint()} at {errorIndex}",
-		)
-	for varBind in varBinds:
-		value = varBind[1]
-		if hasattr(value, "asOctets"):
-			raw_bytes = value.asOctets()
-			try:
-				decoded = raw_bytes.decode("utf-8").strip("\x00").strip()
-				return ToolResult(success=True, output={"value": decoded})
-			except UnicodeDecodeError:
-				return ToolResult(success=True, output={"value": raw_bytes.hex()})
-			return ToolResult(success=True, output={"value": int(value)})
-	return ToolResult(success=False, error="no varbinds returned")
+        errorIndication, errorStatus, errorIndex, varBinds = asyncio.run(_do_get())
+
+        if errorIndication:
+            return ToolResult(success=False, error=str(errorIndication))
+        if errorStatus:
+            return ToolResult(
+                success=False,
+                error=f"SNMP error {errorStatus.prettyPrint()} at {errorIndex}",
+            )
+
+        for varBind in varBinds:
+            value = varBind[1]
+            # Decode OctetString as UTF-8 if it looks printable, else hex
+            if hasattr(value, "asOctets"):
+                raw_bytes = value.asOctets()
+                try:
+                    decoded = raw_bytes.decode("utf-8").strip("\x00").strip()
+                    return ToolResult(success=True, output={"value": decoded})
+                except UnicodeDecodeError:
+                    return ToolResult(success=True, output={"value": raw_bytes.hex()})
+            return ToolResult(success=True, output={"value": int(value)})
+
+        return ToolResult(success=False, error="no varbinds returned")
     except Exception as exc:  # noqa: BLE001
         return ToolResult(success=False, error=str(exc))
 
@@ -544,13 +555,23 @@ def snmp_walk(
         return ToolResult(success=False, error="pysnmp not installed")
 
     try:
-        from pysnmp.hlapi.v3arch.asyncio import (CommunityData, ContextData, ObjectIdentity, ObjectType, SnmpEngine, UdpTransportTarget, walk_cmd)
+        from pysnmp.hlapi.v3arch.asyncio import (
+            CommunityData,
+            ContextData,
+            ObjectIdentity,
+            ObjectType,
+            SnmpEngine,
+            UdpTransportTarget,
+            walk_cmd,
+        )
     except ImportError:
         return ToolResult(success=False, error="pysnmp hlapi unavailable")
 
     async def _do_walk() -> Tuple[List[Dict[str, Any]], Optional[str]]:
         collected: List[Dict[str, Any]] = []
-        transport = await UdpTransportTarget.create((ip, port), timeout=timeout_s, retries=1)
+        transport = await UdpTransportTarget.create(
+            (ip, port), timeout=timeout_s, retries=1
+        )
         async for errorIndication, errorStatus, errorIndex, varBinds in walk_cmd(
             SnmpEngine(),
             CommunityData(community, mpModel=1),
@@ -576,8 +597,8 @@ def snmp_walk(
 
     try:
         rows, err = asyncio.run(_do_walk())
-	if err is not None:
-		return ToolResult(success=False, error=err)
+        if err is not None:
+            return ToolResult(success=False, error=err)
         return ToolResult(success=True, output={"rows": rows})
     except Exception as exc:  # noqa: BLE001
         return ToolResult(success=False, error=str(exc))
