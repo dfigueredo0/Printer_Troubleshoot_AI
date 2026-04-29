@@ -1,0 +1,1246 @@
+{
+  "captured_at": "2026-04-29T03:02:19.947303+00:00",
+  "state_human": "RIBBON_OUT only \u2014 ribbon disengaged from supply spindle; media still loaded; head closed",
+  "ipp": {
+    "attributes": {
+      "attributes-charset": "utf-8",
+      "attributes-natural-language": "en",
+      "charset-configured": "utf-8",
+      "charset-supported": "us-ascii",
+      "client-info-supported": "client-name",
+      "compression-supported": "deflate",
+      "copies-default": "\u0001",
+      "device-uuid": "urn:uuid:48fdd42e-7138-3780-7c74-1662b388e43f",
+      "document-format-default": "application/vnd.zebra",
+      "generated-natural-language-supported": "en",
+      "ipp-versions-supported": "1.1",
+      "job-hold-until-default": "no-hold",
+      "job-hold-until-supported": "indefinite",
+      "job-hold-until-time-supported": "",
+      "job-ids-supported": "\u0001",
+      "job-k-octets-supported": "\u007f\ufffd\ufffd\ufffd",
+      "job-priority-default": "2",
+      "job-priority-supported": "\u0001",
+      "job-sheets-default": "none",
+      "job-sheets-supported": "none",
+      "multiple-document-handling-supported": "separate-documents-uncollated-copies",
+      "multiple-document-jobs-supported": "",
+      "multiple-operation-time-out": "<",
+      "multiple-operation-time-out-action": "abort-job",
+      "natural-language-configured": "en",
+      "notify-events-default": "job-completed",
+      "notify-events-supported": "document-completed",
+      "notify-lease-duration-default": "\u000e\u0010",
+      "notify-lease-duration-supported": "\u0001Q\ufffd",
+      "notify-max-events-supported": "d",
+      "notify-pull-method-supported": "ippget",
+      "operations-supported": "\u0002",
+      "orientation-requested-supported": "\u0003",
+      "pdl-override-supported": "not-attempted",
+      "print-content-optimize-supported": "auto",
+      "print-processing-attributes-supported": "print-color-mode",
+      "print-quality-supported": "\u0004",
+      "print-scaling-supported": "auto",
+      "printer-get-attributes-supported": "document-format",
+      "printer-info": "TEAM 4",
+      "printer-name": "TEAM 4",
+      "printer-uuid": "urn:uuid:48fdd42e-7138-3780-7c74-1662b388e43f",
+      "requesting-user-uri-supported": "\u0001",
+      "smi55357-device-uri": "other-local://",
+      "smi55357-driver": "ZTC ZT411-203dpi ZPL",
+      "uri-security-supported": "none",
+      "which-jobs-supported": "completed",
+      "printer-id": "\u0001",
+      "color-supported": "",
+      "document-format-supported": "application/octet-stream",
+      "finishing-template-supported": "none",
+      "finishing-col-database": "",
+      "finishing-col-default": "",
+      "finishing-col-supported": "finishing-template",
+      "finishings-default": "\u0003",
+      "finishings-supported": "\u0003",
+      "identify-actions-supported": "flash",
+      "ipp-features-supported": "none",
+      "job-creation-attributes-supported": "copies",
+      "label-mode-supported": "applicator",
+      "label-tear-offset-supported": "\ufffd\ufffd\ufffd$\u0000\u0000\u0005\ufffd",
+      "landscape-orientation-requested-preferred": "\u0004",
+      "media-bottom-margin-supported": "",
+      "media-col-supported": "media-bottom-margin",
+      "media-left-margin-supported": "",
+      "media-right-margin-supported": "",
+      "media-size-supported": "",
+      "media-source-supported": "main-roll",
+      "media-supported": "na_label_2x1in",
+      "media-top-margin-supported": "",
+      "media-top-offset-supported": "\ufffd\ufffd\ufffd$\u0000\u0000\u0005\ufffd",
+      "media-tracking-supported": "continuous",
+      "media-type-supported": "labels",
+      "output-bin-supported": "face-up",
+      "pages-per-minute": "<",
+      "pdf-versions-supported": "none",
+      "print-color-mode-supported": "auto",
+      "print-darkness-supported": "<",
+      "print-speed-supported": "\t\ufffd\u0000\u0000w\u0010",
+      "printer-darkness-supported": "\u001e",
+      "printer-device-id": "MFG:Zebra Technologies;MDL:ZTC ZT411-203dpi ZPL;CMD:ZPL;",
+      "printer-kind": "label",
+      "printer-make-and-model": "Zebra Technologies ZTC ZT411-203dpi ZPL",
+      "printer-output-tray": "type=unRemovableBin;maxcapacity=-2;remaining=-2;status=0;name=face-up;stackingorder=lastToFirst;pagedelivery=faceUp;",
+      "printer-resolution-supported": "\ufffd\u0000\u0000\u0000\ufffd\u0003",
+      "pwg-raster-document-resolution-supported": "\ufffd\u0000\u0000\u0000\ufffd\u0003",
+      "pwg-raster-document-type-supported": "black_1",
+      "sides-supported": "one-sided",
+      "urf-supported": "V1.5",
+      "document-format-preferred": "application/vnd.zebra",
+      "printer-is-accepting-jobs": "\u0001",
+      "printer-state": "\u0005",
+      "printer-state-message": "Stopped.",
+      "printer-state-reasons": "marker-supply-empty",
+      "copies-supported": "\u0001\u0000\u0000\u0003\ufffd",
+      "identify-actions-default": "flash",
+      "job-spooling-supported": "spool",
+      "label-mode-configured": "tear-off",
+      "label-tear-offset-configured": "",
+      "media-col-default": "",
+      "media-col-ready": "",
+      "media-default": "custom_4.098x1.507in_4.098x1.507in",
+      "media-ready": "custom_4.098x1.507in_4.098x1.507in",
+      "multiple-document-handling-default": "separate-documents-collated-copies",
+      "orientation-requested-default": "\u0003",
+      "output-bin-default": "face-up",
+      "print-color-mode-default": "monochrome",
+      "print-content-optimize-default": "auto",
+      "print-quality-default": "\u0004",
+      "print-scaling-default": "auto",
+      "printer-config-change-date-time": "\u0007\ufffd\u0004\u001c\u0014:9\u0000+",
+      "printer-config-change-time": "\u0001",
+      "printer-contact-col": "",
+      "printer-current-time": "\u0007\ufffd\u0004\u001c\u0016\u0002\u0013\u0000+",
+      "printer-darkness-configured": "2",
+      "printer-dns-sd-name": "",
+      "printer-firmware-name": "Zebra Printer",
+      "printer-firmware-string-version": "V92.21.39Z",
+      "printer-firmware-version": "\\\u0015'\u0000\u0001,\ufffd",
+      "printer-geo-location": "",
+      "printer-icons": "http://192.168.99.10:631/icon-sm.png",
+      "printer-impressions-completed": "\u0001",
+      "printer-input-tray": "type=sheetFeedAutoRemovableTray;mediafeed=3828;mediaxfeed=10410;maxcapacity=-2;level=-2;status=0;name=main-roll;",
+      "printer-location": "",
+      "printer-more-info": "http://192.168.99.10:631/",
+      "printer-organization": "",
+      "printer-organizational-unit": "",
+      "printer-resolution-default": "\ufffd\u0000\u0000\u0000\ufffd\u0003",
+      "printer-speed-default": "",
+      "printer-state-change-date-time": "\u0007\ufffd\u0004\u001c\u0016\u0002\u0013\u0000+",
+      "printer-state-change-time": "\u000e\ufffd",
+      "printer-strings-languages-supported": "de",
+      "printer-strings-uri": "http://192.168.99.10:631/en.strings",
+      "printer-up-time": "\u000e\ufffd",
+      "printer-uri-supported": "ipp://192.168.99.10:631/ipp/print",
+      "printer-xri-supported": "",
+      "queued-job-count": "",
+      "sides-default": "one-sided",
+      "uri-authentication-supported": "none"
+    }
+  },
+  "snmp_walk_10642_2": {
+    "rows": [
+      {
+        "oid": "1.3.6.1.4.1.10642.2.1.1.0",
+        "value": 1
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.1.2.0",
+        "value": 8
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.1.3.0",
+        "value": 832
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.1.4.0",
+        "value": 23
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.1.5.0",
+        "value": 65
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.1.6.0",
+        "value": 5
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.1.7.0",
+        "value": 1
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.1.8.0",
+        "value": 1
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.1.9.0",
+        "value": 1
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.1.10.0",
+        "value": 203
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.1.11.0",
+        "value": 2
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.1.12.0",
+        "value": 1
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.1.13.0",
+        "value": 0
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.2.1.1.0",
+        "value": "?"
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.2.1.2.0",
+        "value": "?"
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.2.1.3.0",
+        "value": "?"
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.2.1.4.0",
+        "value": "?"
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.2.2.0",
+        "value": "?"
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.2.3.0",
+        "value": 2
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.2.5.0",
+        "value": 0
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.2.6.0",
+        "value": "?"
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.2.7.0",
+        "value": 1
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.2.8.0",
+        "value": 600
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.2.9.0",
+        "value": 1
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.2.10.0",
+        "value": "?"
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.2.13.0",
+        "value": "?"
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.2.14.1.0",
+        "value": "*"
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.2.14.2.0",
+        "value": 1
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.2.14.3.0",
+        "value": "*"
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.2.14.4.0",
+        "value": 4
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.2.15.0",
+        "value": "english"
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.2.16.0",
+        "value": "?"
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.2.17.0",
+        "value": 2
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.2.18.0",
+        "value": 2
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.2.19.0",
+        "value": "none"
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.2.20.0",
+        "value": 2
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.2.21.0",
+        "value": 2
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.2.22.0",
+        "value": 6
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.3.4.1.0",
+        "value": 0
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.3.4.2.0",
+        "value": ""
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.3.5.0",
+        "value": "?"
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.3.6.0",
+        "value": 0
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.3.7.0",
+        "value": 1
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.3.8.0",
+        "value": ""
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.3.9.0",
+        "value": 0
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.3.12.0",
+        "value": ""
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.3.13.0",
+        "value": 0
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.3.14.0",
+        "value": 0
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.3.15.0",
+        "value": 0
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.3.16.0",
+        "value": 2
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.3.17.0",
+        "value": 1
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.3.18.0",
+        "value": 2
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.3.19.0",
+        "value": 2
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.3.20.0",
+        "value": 0
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.3.21.0",
+        "value": ""
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.3.22.0",
+        "value": 0
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.3.25.0",
+        "value": "?"
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.3.26.0",
+        "value": 0
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.3.27.0",
+        "value": "?"
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.3.28.0",
+        "value": 0
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.3.29.0",
+        "value": 0
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.3.30.0",
+        "value": "?"
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.3.31.0",
+        "value": 1
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.3.32.0",
+        "value": 0
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.3.33.0",
+        "value": 0
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.3.34.0",
+        "value": 0
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.3.35.0",
+        "value": 0
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.3.36.0",
+        "value": 0
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.3.37.0",
+        "value": 0
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.3.38.0",
+        "value": 3
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.3.39.0",
+        "value": 3
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.3.40.0",
+        "value": 0
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.3.41.0",
+        "value": 0
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.3.42.0",
+        "value": 0
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.3.43.0",
+        "value": 0
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.3.44.0",
+        "value": 0
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.3.45.0",
+        "value": 0
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.3.46.0",
+        "value": 0
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.3.47.0",
+        "value": "?"
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.3.48.0",
+        "value": "?"
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.3.49.0",
+        "value": 0
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.3.50.1.0",
+        "value": 1
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.3.50.2.0",
+        "value": 1200
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.3.50.3.0",
+        "value": ""
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.3.50.4.0",
+        "value": 2
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.3.50.5.0",
+        "value": 1
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.3.60.1.0",
+        "value": 1
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.3.60.2.0",
+        "value": 180
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.3.70.0",
+        "value": 0
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.3.71.0",
+        "value": 0
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.3.72.0",
+        "value": "?"
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.3.73.0",
+        "value": 3
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.3.74.0",
+        "value": "?"
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.3.75.0",
+        "value": 2
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.3.76.0",
+        "value": 2
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.3.77.0",
+        "value": 1
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.10.1.0",
+        "value": 3
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.10.2.1.0",
+        "value": 2
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.10.2.2.0",
+        "value": ""
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.10.2.3.0",
+        "value": 5
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.10.2.4.0",
+        "value": 310
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.10.3.1.0",
+        "value": "5E"
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.10.3.2.0",
+        "value": "7E"
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.10.3.3.0",
+        "value": "2C"
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.10.3.4.0",
+        "value": 0
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.10.3.5.0",
+        "value": 1
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.10.3.6.0",
+        "value": "1,1,00000000,00010002,0,00000000,00000000"
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.10.3.7.0",
+        "value": "1,1,00000000,00010002"
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.10.3.8.0",
+        "value": "no"
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.10.3.9.0",
+        "value": "nor"
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.10.3.10.0",
+        "value": 0
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.10.3.11.0",
+        "value": ""
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.10.3.12.0",
+        "value": 0
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.10.3.13.0",
+        "value": 1
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.10.3.14.0",
+        "value": 306
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.10.3.15.0",
+        "value": 0
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.10.3.16.0",
+        "value": 15
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.10.4.1.0",
+        "value": 1
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.10.4.2.0",
+        "value": 1
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.10.4.3.0",
+        "value": 2
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.10.4.4.0",
+        "value": -120
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.10.4.5.0",
+        "value": 1
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.10.4.6.0",
+        "value": 4
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.10.4.7.0",
+        "value": 15
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.10.4.8.0",
+        "value": "complete"
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.10.4.9.0",
+        "value": 204
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.10.4.10.0",
+        "value": 49
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.10.4.12.0",
+        "value": 1
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.10.4.13.0",
+        "value": "off"
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.10.4.14.0",
+        "value": 2
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.10.4.15.0",
+        "value": 3
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.20.0",
+        "value": 0
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.2.21.0",
+        "value": 2
+      }
+    ]
+  },
+  "snmp_walk_10642_6": {
+    "rows": [
+      {
+        "oid": "1.3.6.1.4.1.10642.6.1.0",
+        "value": 0
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.6.2.0",
+        "value": 20
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.6.4.0",
+        "value": 0
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.6.5.0",
+        "value": "12.0"
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.6.6.0",
+        "value": 1
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.6.7.0",
+        "value": 0
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.6.8.0",
+        "value": 1
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.6.9.0",
+        "value": 1
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.6.10.0",
+        "value": 1
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.6.11.0",
+        "value": 1
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.6.12.0",
+        "value": 1
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.6.13.0",
+        "value": 1
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.6.14.0",
+        "value": 1
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.6.15.0",
+        "value": 1
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.6.16.0",
+        "value": 1
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.6.17.0",
+        "value": 1
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.6.18.0",
+        "value": 1
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.6.19.0",
+        "value": 1
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.6.20.0",
+        "value": 0
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.6.21.0",
+        "value": 1
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.6.22.0",
+        "value": 2
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.6.23.0",
+        "value": 1
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.6.24.0",
+        "value": 2
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.6.25.0",
+        "value": 2
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.6.26.0",
+        "value": "20.0"
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.6.27.0",
+        "value": 10
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.6.28.0",
+        "value": 1
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.6.29.0",
+        "value": ""
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.6.30.0",
+        "value": 2
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.6.31.0",
+        "value": 2
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.6.32.0",
+        "value": 2
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.6.33.0",
+        "value": 2
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.6.34.0",
+        "value": ""
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.6.35.0",
+        "value": 1
+      }
+    ]
+  },
+  "snmp_walk_10642_10": {
+    "rows": [
+      {
+        "oid": "1.3.6.1.4.1.10642.10.1.0",
+        "value": "0"
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.10.2.0",
+        "value": "empty"
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.10.3.0",
+        "value": "empty"
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.10.4.0",
+        "value": 1
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.10.10.1.0",
+        "value": 4
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.10.10.2.0",
+        "value": 4
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.10.10.3.0",
+        "value": 1
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.10.10.4.0",
+        "value": 1
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.10.11.1.0",
+        "value": 2
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.10.11.2.0",
+        "value": ""
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.10.11.3.0",
+        "value": 2
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.10.11.4.0",
+        "value": 10000
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.10.11.5.0",
+        "value": ""
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.10.11.6.0",
+        "value": ""
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.10.12.1.0",
+        "value": 3
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.10.12.2.0",
+        "value": 1
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.10.12.3.0",
+        "value": 3
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.10.12.4.0",
+        "value": 1
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.10.12.5.0",
+        "value": 1
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.10.12.6.0",
+        "value": 1
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.10.12.7.0",
+        "value": 2
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.10.12.8.0",
+        "value": 1
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.10.12.9.0",
+        "value": "present"
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.10.12.10.0",
+        "value": 2
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.10.12.11.0",
+        "value": 1
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.10.12.12.0",
+        "value": 2
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.10.12.13.0",
+        "value": 2
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.10.13.1.0",
+        "value": "?"
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.10.13.2.0",
+        "value": ""
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.10.14.0",
+        "value": "ZT41142-T410000Z"
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.10.15.1.0",
+        "value": "12"
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.10.15.2.0",
+        "value": "12"
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.10.16.0",
+        "value": "1"
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.10.17.1.0",
+        "value": "0"
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.10.17.2.0",
+        "value": "0"
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.10.18.0",
+        "value": "ZT41142-T410000Z"
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.10.20.0",
+        "value": 1
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.10.21.0",
+        "value": 1
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.10.22.1.0",
+        "value": "0"
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.10.22.2.0",
+        "value": "0"
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.10.28.1.0",
+        "value": 0
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.10.28.29.1.0",
+        "value": "0,A,0000,0000,0000"
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.10.30.1.0",
+        "value": 1
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.10.30.2.0",
+        "value": 1
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.10.30.3.0",
+        "value": 1
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.10.30.4.0",
+        "value": 1
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.10.30.5.0",
+        "value": 1
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.10.30.6.0",
+        "value": 1
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.10.30.7.0",
+        "value": 1
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.10.30.8.0",
+        "value": 1
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.10.30.9.0",
+        "value": 1
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.10.30.10.0",
+        "value": 2
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.10.30.11.0",
+        "value": 2
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.10.30.12.0",
+        "value": 1
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.10.30.13.0",
+        "value": 1
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.10.30.14.0",
+        "value": 1
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.10.30.15.0",
+        "value": 1
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.10.31.1.1.1",
+        "value": 1
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.10.31.1.1.33",
+        "value": 33
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.10.31.1.1.34",
+        "value": 34
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.10.31.1.2.1",
+        "value": 1
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.10.31.1.2.33",
+        "value": 3
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.10.31.1.2.34",
+        "value": 3
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.10.31.1.3.1",
+        "value": 3
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.10.31.1.3.33",
+        "value": 4
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.10.31.1.3.34",
+        "value": 4
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.10.31.1.4.1",
+        "value": 1
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.10.31.1.4.33",
+        "value": 3
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.10.31.1.4.34",
+        "value": 1
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.10.31.1.5.1",
+        "value": 15
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.10.31.1.5.33",
+        "value": 2
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.10.31.1.5.34",
+        "value": 11
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.10.31.1.6.1",
+        "value": 695
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.10.31.1.6.33",
+        "value": 401798
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.10.31.1.6.34",
+        "value": 401800
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.10.32.0",
+        "value": 1
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.10.33.1.0",
+        "value": 2
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.10.33.2.0",
+        "value": 2
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.10.34.0",
+        "value": "99N2547005540387AEEDE60300000123CE69642E18D8DE"
+      }
+    ]
+  },
+  "alerts": {
+    "alerts": [
+      {
+        "id": 1,
+        "severity": 1,
+        "type": 3,
+        "group": 1,
+        "code": 15,
+        "timestamp": 695
+      },
+      {
+        "id": 33,
+        "severity": 3,
+        "type": 4,
+        "group": 3,
+        "code": 2,
+        "timestamp": 401798
+      },
+      {
+        "id": 34,
+        "severity": 3,
+        "type": 4,
+        "group": 1,
+        "code": 11,
+        "timestamp": 401800
+      }
+    ],
+    "count": 3,
+    "raw_rows": [
+      {
+        "oid": "1.3.6.1.4.1.10642.10.31.1.1.1",
+        "value": 1
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.10.31.1.1.33",
+        "value": 33
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.10.31.1.1.34",
+        "value": 34
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.10.31.1.2.1",
+        "value": 1
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.10.31.1.2.33",
+        "value": 3
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.10.31.1.2.34",
+        "value": 3
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.10.31.1.3.1",
+        "value": 3
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.10.31.1.3.33",
+        "value": 4
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.10.31.1.3.34",
+        "value": 4
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.10.31.1.4.1",
+        "value": 1
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.10.31.1.4.33",
+        "value": 3
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.10.31.1.4.34",
+        "value": 1
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.10.31.1.5.1",
+        "value": 15
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.10.31.1.5.33",
+        "value": 2
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.10.31.1.5.34",
+        "value": 11
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.10.31.1.6.1",
+        "value": 695
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.10.31.1.6.33",
+        "value": 401798
+      },
+      {
+        "oid": "1.3.6.1.4.1.10642.10.31.1.6.34",
+        "value": 401800
+      }
+    ]
+  }
+}
