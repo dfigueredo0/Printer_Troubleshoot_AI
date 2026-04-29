@@ -193,46 +193,89 @@ class ToolRegistry:
 # ---------------------------------------------------------------------------
 
 class ZT411OIDs:
-    """SNMP OID constants for the Zebra ZT411.
+    # ===================================================================
+    # Standard MIBs (kept for cross-vendor compatibility, but mostly NOT
+    # implemented on this Zebra firmware — see notes below).
+    # ===================================================================
 
-    Standard Printer-MIB (RFC 3805) OIDs work on all SNMP-capable Zebra
-    printers.  Zebra enterprise OIDs (1.3.6.1.4.1.10642.*) are ZT-series
-    specific; availability depends on firmware version.
-    """
+    # System group (SNMPv2-MIB) — this works
+    SYS_DESCR    = "1.3.6.1.2.1.1.1.0"
+    SYS_OBJECT   = "1.3.6.1.2.1.1.2.0"
+    SYS_UPTIME   = "1.3.6.1.2.1.1.3.0"
+    SYS_NAME     = "1.3.6.1.2.1.1.5.0"
 
-    # Standard system (SNMPv2-MIB)
-    SYS_DESCR = "1.3.6.1.2.1.1.1.0"
-    SYS_NAME = "1.3.6.1.2.1.1.5.0"
+    # Host-Resources MIB — partially populated
+    HR_DEVICE_STATUS = "1.3.6.1.2.1.25.3.2.1.5.1"  # always returns 1 (unknown) on this firmware
 
-    # IF-MIB — first interface MAC address
-    IF_PHYS_ADDR = "1.3.6.1.2.1.2.2.1.6.1"
+    # Standard Printer-MIB (RFC 3805) — NOT IMPLEMENTED on this firmware.
+    # Walks of 1.3.6.1.2.1.43.* return 0 rows. Kept here for reference
+    # only; queries against these OIDs will not return useful data.
+    PRT_NAME           = "1.3.6.1.2.1.43.5.1.1.16.1"   # returns nothing
+    PRT_ALERT_DESCR    = "1.3.6.1.2.1.43.18.1.1.8"     # returns nothing
+    PRT_MARKER_SUPPLIES = "1.3.6.1.2.1.43.11.1.1.6"    # returns nothing
 
-    # HOST-RESOURCES-MIB
-    HR_PRINTER_STATUS = "1.3.6.1.2.1.25.3.5.1.1.1"   # 3=idle,4=printing,5=warmup
+    # ===================================================================
+    # Zebra enterprise tree (1.3.6.1.4.1.10642) — verified empirically
+    # against ZT411 firmware V92.21.39Z on 2026-04-27.
+    # ===================================================================
 
-    # Printer-MIB (RFC 3805 / prt*)
-    PRT_GENERAL_PRINTER_NAME = "1.3.6.1.2.1.43.5.1.1.1.1"
-    PRT_GENERAL_RESET = "1.3.6.1.2.1.43.5.1.1.3.1"   # SET 4=reset-to-power-on
-    PRT_ALERT_DESCR = "1.3.6.1.2.1.43.18.1.1.8"       # walk
-    PRT_MARKER_SUPPLIES_DESCR = "1.3.6.1.2.1.43.11.1.1.6.1.1"
-    PRT_MARKER_SUPPLIES_LEVEL = "1.3.6.1.2.1.43.11.1.1.9.1.1"
-    PRT_MARKER_SUPPLIES_MAX = "1.3.6.1.2.1.43.11.1.1.8.1.1"
-    PRT_MARKER_SUPPLIES_DESCR_TABLE = "1.3.6.1.2.1.43.11.1.1.6"  # walk
-    PRT_MARKER_SUPPLIES_LEVEL_TABLE = "1.3.6.1.2.1.43.11.1.1.9"  # walk
-    PRT_MARKER_SUPPLIES_MAX_TABLE = "1.3.6.1.2.1.43.11.1.1.8"    # walk
+    # --- Identity (verified, all match Phase 1 lab passport) ---
+    ZBR_MODEL    = "1.3.6.1.4.1.10642.1.1.0"   # 'ZTC ZT411-203dpi ZPL'
+    ZBR_FIRMWARE = "1.3.6.1.4.1.10642.1.2.0"   # 'V92.21.39Z'
+    ZBR_SERIAL   = "1.3.6.1.4.1.10642.1.4.0"   # '99N254700554'
+    ZBR_LINK_OS  = "1.3.6.1.4.1.10642.1.18.0"  # '7.4'
+    ZBR_MFG      = "1.3.6.1.4.1.10642.1.11.0"  # 'Zebra Technologies'
 
-    # Zebra enterprise (1.3.6.1.4.1.10642) — ZT-series / Link-OS
-    ZBR_MODEL     = "1.3.6.1.4.1.10642.1.1.0"   
-    ZBR_FIRMWARE  = "1.3.6.1.4.1.10642.1.2.0"   
-    ZBR_SERIAL    = "1.3.6.1.4.1.10642.1.4.0"   
-    ZBR_LINK_OS   = "1.3.6.1.4.1.10642.1.18.0"  
-    ZBR_MFG       = "1.3.6.1.4.1.10642.1.11.0"  
-    ZBR_HEAD_OPEN  = None # "1.3.6.1.4.1.10642.2.3.6.0"   # candidates: 10642.2.3.6.0, 10642.2.3.20.0
-    ZBR_MEDIA_OUT  = None # "1.3.6.1.4.1.10642.2.3.9.0"   # candidates: 10642.2.3.9.0, 10642.2.3.13.0
-    ZBR_RIBBON_OUT = None # "1.3.6.1.4.1.10642.2.3.14.0"   # candidates: 10642.2.3.14.0, 10642.2.3.15.0
-    ZBR_PAUSED     = None # "1.3.6.1.4.1.10642.2.3.16.0" 
-    ZBR_ERROR_CODE = "1.3.6.1.4.1.10642.2.3.4.1.0" 
-    ZBR_ERROR_TEXT = "1.3.6.1.4.1.10642.2.3.4.2.0"   
+    # --- Per-state physical-flag OIDs (verified by induce-and-diff) ---
+    # All read 1 at idle, 2 when their condition is active.
+    ZBR_HEAD_OPEN  = "1.3.6.1.4.1.10642.2.1.1.0"   # head latch lifted
+    ZBR_MEDIA_OUT  = "1.3.6.1.4.1.10642.6.23.0"    # media missing
+    ZBR_RIBBON_OUT = "1.3.6.1.4.1.10642.6.24.0"    # ribbon missing
+    ZBR_ANY_FAULT  = "1.3.6.1.4.1.10642.6.22.0"    # composite "any error" flag
+
+    # PAUSED has NO dedicated SNMP OID on this firmware.
+    # Detect via IPP: printer-state==5 AND ZBR_STATE_BITMASK is all-zeros.
+    ZBR_PAUSED = None
+
+    # --- State bitmask (verified) ---
+    # Comma-string with a hex bitmask in position 4.
+    # Idle:        '0,0,00000000,00000000'
+    # Media-out:   '1,1,00000000,00010001'   bit 0 = 0x01
+    # Ribbon-out:  '1,1,00000000,00010002'   bit 1 = 0x02
+    # Head-open:   '1,1,00000000,00010004'   bit 2 = 0x04
+    # Multiple states OR together. Pause is NOT represented in this bitmask.
+    ZBR_STATE_BITMASK = "1.3.6.1.4.1.10642.2.10.3.7.0"
+    # Bit positions:
+    ZBR_BIT_MEDIA_OUT  = 0x01
+    ZBR_BIT_RIBBON_OUT = 0x02
+    ZBR_BIT_HEAD_OPEN  = 0x04
+
+    # Companion bitmask (longer comma-string; same hex value at position 4
+    # plus extra fields). Use _BITMASK above; this exists for completeness.
+    ZBR_STATE_BITMASK_LONG = "1.3.6.1.4.1.10642.2.10.3.6.0"
+
+    # Composite "ready" boolean. 'yes' at idle, 'no' for any fault.
+    # Does NOT flip for pause (consistent with the bitmask behavior).
+    ZBR_READY = "1.3.6.1.4.1.10642.2.10.3.8.0"
+
+    # --- Alert table (verified) ---
+    # Walk this prefix to enumerate active alerts. Empty at idle/pause,
+    # populated during faults. Each alert occupies 6 columns indexed by
+    # a sequential alert ID:
+    #   .1.<id> = alert ID (monotonic, doesn't reset)
+    #   .2.<id> = severity (3 = critical, observed)
+    #   .3.<id> = type (4 = physical fault, observed)
+    #   .4.<id> = group (4=head, 2=media, 1=informational/follow-on)
+    #   .5.<id> = code (specific to alert)
+    #   .6.<id> = timestamp (uptime ticks)
+    ZBR_ALERT_TABLE = "1.3.6.1.4.1.10642.10.31.1"
+
+    # --- Provisional (do not trust until verified) ---
+    # Original zebra error-code/text OIDs. These ALWAYS read 0/empty on
+    # this firmware, even during active faults. Kept for backward
+    # compatibility but agent should prefer the bitmask + alert table.
+    ZBR_ERROR_CODE = "1.3.6.1.4.1.10642.2.3.4.1.0"   # observed: always 0
+    ZBR_ERROR_TEXT = "1.3.6.1.4.1.10642.2.3.4.2.0"   # observed: always ''  
 
 # ---------------------------------------------------------------------------
 # Zebra error-code → KB citation mapping
@@ -652,39 +695,59 @@ def snmp_zt411_physical_flags(
     ip: str,
     community: str = "public",
 ) -> ToolResult:
-    """Read ZT411 physical condition flags (head_open, media_out, ribbon_out, paused).
-
-    Uses Zebra enterprise OIDs; falls back to alert table walk.
-    Returns output={'head_open': bool|None, 'media_out': bool|None,
-                    'ribbon_out': bool|None, 'paused': bool|None}
+    """Read ZT411 physical condition flags via Zebra state bitmask.
+    
+    Reads the state bitmask at ZBR_STATE_BITMASK and decodes bit
+    positions for media_out, ribbon_out, head_open. Pause has no
+    SNMP representation on this firmware (V92.21.39Z) — caller must
+    use ipp_get_attributes() and check printer-state for that.
+    
+    Returns output={'head_open': bool, 'media_out': bool,
+                    'ribbon_out': bool, 'paused': None,
+                    'raw_bitmask': str}
     """
     o = ZT411OIDs
     flags: Dict[str, Optional[bool]] = {
         "head_open": None,
         "media_out": None,
         "ribbon_out": None,
-        "paused": None,
+        "paused": None,           # always None — not in SNMP on this firmware
     }
 
-    mappings = [
-        ("head_open", o.ZBR_HEAD_OPEN),
-        ("media_out", o.ZBR_MEDIA_OUT),
-        ("ribbon_out", o.ZBR_RIBBON_OUT),
-        ("paused", o.ZBR_PAUSED),
-    ]
-    any_ok = False
-    for flag_name, oid in mappings:
-        r = snmp_get(ip, oid, community)
-        if r.success and r.output is not None:
-            try:
-                flags[flag_name] = int(r.output.get("value", 0)) == 1
-                any_ok = True
-            except (TypeError, ValueError):
-                pass
+    r = snmp_get(ip, o.ZBR_STATE_BITMASK, community)
+    if not r.success or r.output is None:
+        return ToolResult(
+            success=False,
+            output=flags,
+            error=f"could not read state bitmask: {r.error}",
+        )
 
-    if not any_ok:
-        return ToolResult(success=False, output=flags, error="Zebra enterprise OIDs not available")
-    return ToolResult(success=True, output=flags)
+    raw = str(r.output.get("value", ""))
+    # Parse comma-string: '1,1,00000000,000100XX'
+    parts = raw.split(",")
+    if len(parts) < 4:
+        return ToolResult(
+            success=False,
+            output={**flags, "raw_bitmask": raw},
+            error=f"unexpected bitmask format: {raw!r}",
+        )
+    try:
+        bits = int(parts[3], 16)
+    except ValueError:
+        return ToolResult(
+            success=False,
+            output={**flags, "raw_bitmask": raw},
+            error=f"could not parse hex from bitmask field: {parts[3]!r}",
+        )
+
+    flags["media_out"]  = bool(bits & o.ZBR_BIT_MEDIA_OUT)
+    flags["ribbon_out"] = bool(bits & o.ZBR_BIT_RIBBON_OUT)
+    flags["head_open"]  = bool(bits & o.ZBR_BIT_HEAD_OPEN)
+
+    return ToolResult(
+        success=True,
+        output={**flags, "raw_bitmask": raw, "bits_set": hex(bits)},
+    )
 
 def snmp_zt411_consumables(
     ip: str,
@@ -693,18 +756,59 @@ def snmp_zt411_consumables(
     """Read ribbon and media levels via Printer-MIB marker supplies table.
 
     Returns output={'consumables': [{'name': str, 'level': int, 'max': int, 'pct': float}]}
+
+    NOTE: This printer firmware (V92.21.39Z) does NOT implement the
+    standard Printer-MIB. The marker supplies table at 1.3.6.1.2.1.43.11
+    returns zero rows on this hardware. This function therefore returns
+    success=False with an explicit error rather than silently returning
+    an empty list (which would be indistinguishable from a healthy printer
+    with full consumables).
+
+    Direct-thermal/thermal-transfer label printers do not generally report
+    fill percentage — they have no way to measure roll size remaining.
+    Consumable state on this printer surfaces as discrete events
+    (media-out, ribbon-out) rather than continuous levels. For those,
+    use snmp_zt411_physical_flags() or snmp_zt411_alerts().
+
+    A future revision of this function should walk Zebra-native
+    consumable counters under 10642.* (label-printed counter, ribbon
+    usage counter) once those OIDs have been mapped empirically.
     """
     desc_r = snmp_walk(ip, ZT411OIDs.PRT_MARKER_SUPPLIES_DESCR_TABLE, community)
     level_r = snmp_walk(ip, ZT411OIDs.PRT_MARKER_SUPPLIES_LEVEL_TABLE, community)
     max_r = snmp_walk(ip, ZT411OIDs.PRT_MARKER_SUPPLIES_MAX_TABLE, community)
 
     if not (desc_r.success and level_r.success):
-        return ToolResult(success=False, error="Could not read marker supplies OIDs")
+        return ToolResult(
+            success=False,
+            error=f"Marker supplies walk failed: descr={desc_r.error!r} level={level_r.error!r}",
+        )
 
-    descs = [row["value"] for row in (desc_r.output or {}).get("rows", [])]
-    levels = [row["value"] for row in (level_r.output or {}).get("rows", [])]
-    maxes = [row["value"] for row in (max_r.output or {}).get("rows", [])]
+    desc_rows = (desc_r.output or {}).get("rows", [])
+    level_rows = (level_r.output or {}).get("rows", [])
+    max_rows = (max_r.output or {}).get("rows", []) if max_r.success else []
 
+    # If the standard Printer-MIB tables are empty, this firmware doesn't
+    # implement them. Be explicit rather than returning an empty list that
+    # would look like "all consumables are fine."
+    if not desc_rows and not level_rows:
+        return ToolResult(
+            success=False,
+            output={"consumables": [], "source": "prtMarkerSupplies"},
+            error=(
+                "standard Printer-MIB marker supplies table not implemented "
+                "on this firmware (1.3.6.1.2.1.43.11.* returns zero rows); "
+                "use snmp_zt411_physical_flags() for media/ribbon presence "
+                "or ipp_get_attributes() for printer-input-tray detail"
+            ),
+        )
+
+    # Below: original logic, kept intact for printers that DO implement
+    # the standard table. Will run on non-Zebra hardware or future Zebra
+    # firmware that adds Printer-MIB support.
+    descs = [row["value"] for row in desc_rows]
+    levels = [row["value"] for row in level_rows]
+    maxes = [row["value"] for row in max_rows]
     consumables: List[Dict[str, Any]] = []
     for i, name in enumerate(descs):
         level = levels[i] if i < len(levels) else -1
@@ -715,65 +819,63 @@ def snmp_zt411_consumables(
             pct = round(level_int / cap_int * 100, 1) if cap_int > 0 else -1
         except (TypeError, ValueError, ZeroDivisionError):
             level_int, cap_int, pct = -1, -1, -1.0
-        consumables.append({"name": str(name), "level": level_int, "max": cap_int, "pct": pct})
-
-    return ToolResult(success=True, output={"consumables": consumables})
+        consumables.append({
+            "name": str(name), "level": level_int,
+            "max": cap_int, "pct": pct,
+        })
+    return ToolResult(
+        success=True,
+        output={"consumables": consumables, "source": "prtMarkerSupplies"},
+    )
 
 def snmp_zt411_alerts(
     ip: str,
     community: str = "public",
 ) -> ToolResult:
-    """Query Zebra-specific alert/error sources.
-
-    Returns output={'alerts': [str], 'error_codes': [str], 'sources_queried': [str]}.
-    success=True only if at least one source returned a usable response.
+    """Walk Zebra's alert table for active alerts.
     
-    NOTE: This printer does NOT implement the standard Printer-MIB
-    (1.3.6.1.2.1.43.*), so prtAlertDescription is not queried. The
-    Zebra enterprise alert subtree under 1.3.6.1.4.1.10642 has not yet
-    been fully mapped on this firmware (V92.21.39Z); the OIDs probed
-    below are best-effort.
+    Returns output={'alerts': [...], 'count': N, 'raw': [...]}
     
-    For authoritative printer state on this hardware, prefer
-    ipp_get_attributes() and read 'printer-state' / 'printer-state-reasons'.
+    Each alert dict has: id, severity, type, group, code, timestamp.
+    Empty list at idle. Pause does not populate the alert table on
+    this firmware — that's expected, not a bug.
     """
-    alerts: List[str] = []
-    error_codes: List[str] = []
-    sources_queried: List[str] = []
-    any_source_responded = False
+    o = ZT411OIDs
 
-    # Try the Zebra error-code OID (10642.2.3.4.1.0).
-    # Currently observed to read 0 even during active errors —
-    # may not be the right OID for this firmware, but harmless to probe.
-    ec_r = snmp_get(ip, ZT411OIDs.ZBR_ERROR_CODE, community)
-    sources_queried.append("ZBR_ERROR_CODE")
-    if ec_r.success and ec_r.output:
-        any_source_responded = True
-        code = str(ec_r.output.get("value", "")).strip()
-        if code and code not in ("0", ""):
-            error_codes.append(code)
+    r = snmp_walk(ip, o.ZBR_ALERT_TABLE, community, max_rows=200)
+    if not r.success:
+        return ToolResult(success=False, error=f"alert table walk failed: {r.error}")
 
-    # Try the Zebra error-text OID (10642.2.3.4.2.0).
-    et_r = snmp_get(ip, ZT411OIDs.ZBR_ERROR_TEXT, community)
-    sources_queried.append("ZBR_ERROR_TEXT")
-    if et_r.success and et_r.output:
-        any_source_responded = True
-        text = str(et_r.output.get("value", "")).strip()
-        if text:
-            alerts.append(text)
+    rows = r.output.get("rows", []) if r.output else []
 
-    if not any_source_responded:
-        return ToolResult(
-            success=False,
-            output={"alerts": alerts, "error_codes": error_codes,
-                    "sources_queried": sources_queried},
-            error="no Zebra alert source responded; try IPP printer-state-reasons instead",
-        )
+    # Group columns by alert ID (the trailing OID component).
+    # OIDs look like: 1.3.6.1.4.1.10642.10.31.1.<col>.<id>
+    by_id: Dict[str, Dict[int, Any]] = defaultdict(dict)
+    for row in rows:
+        oid = row["oid"]
+        # Strip the table prefix and split column.id
+        if not oid.startswith(o.ZBR_ALERT_TABLE + "."):
+            continue
+        suffix = oid[len(o.ZBR_ALERT_TABLE) + 1:]
+        try:
+            col_str, alert_id = suffix.split(".", 1)
+            col = int(col_str)
+        except (ValueError, IndexError):
+            continue
+        by_id[alert_id][col] = row["value"]
+
+    COL_NAMES = {1: "id", 2: "severity", 3: "type", 4: "group",
+                 5: "code", 6: "timestamp"}
+
+    alerts = []
+    for alert_id, cols in sorted(by_id.items(), key=lambda kv: int(kv[0])
+                                 if kv[0].isdigit() else 0):
+        alert = {COL_NAMES.get(c, f"col_{c}"): v for c, v in cols.items()}
+        alerts.append(alert)
 
     return ToolResult(
         success=True,
-        output={"alerts": alerts, "error_codes": error_codes,
-                "sources_queried": sources_queried},
+        output={"alerts": alerts, "count": len(alerts), "raw_rows": rows},
     )
 
 def ipp_get_attributes(ip: str, port: int = 631) -> ToolResult:
