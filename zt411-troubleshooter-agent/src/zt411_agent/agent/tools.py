@@ -700,23 +700,38 @@ def snmp_zt411_physical_flags(
     ip: str,
     community: str = "public",
 ) -> ToolResult:
-    """Read ZT411 physical condition flags via Zebra state bitmask.
-    
-    Reads the state bitmask at ZBR_STATE_BITMASK and decodes bit
-    positions for media_out, ribbon_out, head_open. Pause has no
-    SNMP representation on this firmware (V92.21.39Z) — caller must
-    use ipp_get_attributes() and check printer-state for that.
-    
-    Returns output={'head_open': bool, 'media_out': bool,
-                    'ribbon_out': bool, 'paused': None,
-                    'raw_bitmask': str}
+    """Read ZT411 physical condition flags via Zebra state bitmask + alert table.
+
+    Reads the state bitmask at ZBR_STATE_BITMASK and the live alert table.
+    Decodes:
+      - media_out, ribbon_out, head_open from bitmask part 1 (specific bits)
+      - paused from bitmask part 2 (composite not-ready bit) AND alert
+        table cross-check to distinguish user-pause from auto-pause
+        secondary to a physical fault
+
+    Verified against ZT411 firmware V92.21.39Z (induce-and-diff 2026-04-28).
+
+    Returns output={
+        'head_open':  bool,
+        'media_out':  bool,
+        'ribbon_out': bool,
+        'paused':     bool,
+        'paused_is_user_initiated': bool | None,
+            # True  = pause without any other fault (user pressed pause)
+            # False = pause is auto-emitted alongside another fault
+            # None  = not paused, or could not be determined
+        'raw_bitmask': str,
+        'bits_set_part1': str,
+        'bits_set_part2': str,
+    }
     """
     o = ZT411OIDs
-    flags: Dict[str, Optional[bool]] = {
-        "head_open": None,
-        "media_out": None,
+    flags: Dict[str, Any] = {
+        "head_open":  None,
+        "media_out":  None,
         "ribbon_out": None,
-        "paused": None,           # always None — not in SNMP on this firmware
+        "paused":     None,
+        "paused_is_user_initiated": None,
     }
 
     r = snmp_get(ip, o.ZBR_STATE_BITMASK, community)
@@ -728,7 +743,6 @@ def snmp_zt411_physical_flags(
         )
 
     raw = str(r.output.get("value", ""))
-    # Parse comma-string: '1,1,00000000,000100XX'
     parts = raw.split(",")
     if len(parts) < 4:
         return ToolResult(
@@ -736,46 +750,117 @@ def snmp_zt411_physical_flags(
             output={**flags, "raw_bitmask": raw},
             error=f"unexpected bitmask format: {raw!r}",
         )
+
     try:
-        bits = int(parts[3], 16)
+        bits_part1 = int(parts[2], 16)
+        bits_part2 = int(parts[3], 16)
     except ValueError:
         return ToolResult(
             success=False,
             output={**flags, "raw_bitmask": raw},
-            error=f"could not parse hex from bitmask field: {parts[3]!r}",
+            error=f"could not parse hex from bitmask: parts={parts!r}",
         )
 
-    flags["media_out"]  = bool(bits & o.ZBR_BIT_MEDIA_OUT)
-    flags["ribbon_out"] = bool(bits & o.ZBR_BIT_RIBBON_OUT)
-    flags["head_open"]  = bool(bits & o.ZBR_BIT_HEAD_OPEN)
+    flags["media_out"]  = bool(bits_part1 & o.ZBR_BIT_MEDIA_OUT)
+    flags["ribbon_out"] = bool(bits_part1 & o.ZBR_BIT_RIBBON_OUT)
+    flags["head_open"]  = bool(bits_part1 & o.ZBR_BIT_HEAD_OPEN)
+
+    # Pause: composite bit in part 2 is set whenever printer is not-ready,
+    # which includes pause AND physical faults. So "paused" = the bit is
+    # set AND no physical-fault bit is set in part 1... OR the alert table
+    # contains a code=11 row, which is the more reliable indicator.
+    not_ready = bool(bits_part2 & o.ZBR_BIT_NOT_READY)
+    has_physical_fault = bool(
+        bits_part1 & (o.ZBR_BIT_MEDIA_OUT | o.ZBR_BIT_RIBBON_OUT | o.ZBR_BIT_HEAD_OPEN)
+    )
+
+    # Cross-check the alert table for an active pause entry (code=11).
+    alerts_r = snmp_zt411_alerts(ip, community)
+    pause_in_alerts = False
+    has_other_critical = False
+    if alerts_r.success and alerts_r.output:
+        for a in alerts_r.output.get("alerts", []):
+            if a.get("severity") != o.ZBR_SEVERITY_CRITICAL:
+                continue  # skip the persistent boot informational entry
+            if a.get("group") == o.ZBR_GROUP_INFO and a.get("code") == 11:
+                pause_in_alerts = True
+            else:
+                has_other_critical = True
+
+    flags["paused"] = pause_in_alerts or (not_ready and not has_physical_fault)
+    if flags["paused"]:
+        flags["paused_is_user_initiated"] = not has_other_critical
 
     return ToolResult(
         success=True,
-        output={**flags, "raw_bitmask": raw, "bits_set": hex(bits)},
+        output={
+            **flags,
+            "raw_bitmask":     raw,
+            "bits_set_part1":  hex(bits_part1),
+            "bits_set_part2":  hex(bits_part2),
+        },
     )
 
-def snmp_zt411_consumables(ip: str, community: str = "public") -> ToolResult:
-    """
-    Report consumable presence on ZT411 firmware V92.21.39Z.
+def snmp_zt411_consumables(
+    ip: str,
+    community: str = "public",
+) -> ToolResult:
+    """Read consumable presence on ZT411 via Zebra-specific OIDs.
 
-    This firmware does NOT expose ribbon/media level percentages via SNMP
-    (verified by induce-and-diff against a Phase 1 lab unit on 2026-04-28).
-    Returns boolean presence only. For finer-grained estimation, the agent
-    should fall back to IPP marker-* attributes if available, or escalate
-    to a physical inspection.
+    This printer firmware (V92.21.39Z) does NOT expose ribbon/media level
+    percentages via SNMP (verified by induce-and-diff 2026-04-28). The
+    standard Printer-MIB marker supplies table at 1.3.6.1.2.1.43.11 is
+    not implemented; no working level OIDs were found in the Zebra
+    enterprise tree either.
+
+    Returns boolean presence only:
+      output = {
+        'media':  'present' | 'empty' | 'unknown',
+        'ribbon': 'present' | 'empty' | 'unknown',
+        'supports_levels': False,
+        'sources_queried': [...],
+        'note': str,
+      }
+
+    For richer state (e.g. low-paper warnings) the agent should fall back
+    to ipp_get_attributes() and look at marker-* attributes if the firmware
+    populates them.
     """
-    media = snmp_get(ip, ZT411OIDs.ZBR_MEDIA_OUT, community)   # 1=present, 2=empty
-    ribbon = snmp_get(ip, ZT411OIDs.ZBR_RIBBON_OUT, community)
+    o = ZT411OIDs
+
+    media_r  = snmp_get(ip, o.ZBR_MEDIA_OUT,  community)
+    ribbon_r = snmp_get(ip, o.ZBR_RIBBON_OUT, community)
+
+    def interpret(r: ToolResult) -> str:
+        if not r.success or r.output is None:
+            return "unknown"
+        v = r.output.get("value")
+        if v == 1:
+            return "present"
+        if v == 2:
+            return "empty"
+        return "unknown"
+
+    media_state  = interpret(media_r)
+    ribbon_state = interpret(ribbon_r)
 
     return ToolResult(
-        success=(media.success and ribbon.success),
+        success=(media_r.success and ribbon_r.success),
         output={
-            "media":  "present" if media.value == 1  else "empty" if media.value == 2  else "unknown",
-            "ribbon": "present" if ribbon.value == 1 else "empty" if ribbon.value == 2 else "unknown",
+            "media":  media_state,
+            "ribbon": ribbon_state,
             "supports_levels": False,
-            "note": "ZT411 firmware V92.21.39Z exposes presence only; no level data via SNMP",
             "sources_queried": ["ZBR_MEDIA_OUT", "ZBR_RIBBON_OUT"],
+            "note": (
+                "ZT411 firmware V92.21.39Z exposes consumable presence only; "
+                "no ribbon/media level data via SNMP. Standard Printer-MIB "
+                "marker supplies table not implemented on this firmware."
+            ),
         },
+        error=(
+            None if (media_r.success and ribbon_r.success)
+            else f"media: {media_r.error!r}; ribbon: {ribbon_r.error!r}"
+        ),
     )
 
 def snmp_zt411_alerts(
