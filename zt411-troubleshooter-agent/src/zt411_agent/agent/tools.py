@@ -658,43 +658,70 @@ def snmp_walk(
 # DEVICE TOOLS  (ZT411-specific SNMP + IPP)
 # ===========================================================================
 
+# ===========================================================================
+# DEVICE TOOLS  (ZT411-specific SNMP + IPP)
+# ===========================================================================
 def snmp_zt411_status(
     ip: str,
     community: str = "public",
 ) -> ToolResult:
-    """Read ZT411 printer status via SNMP.
+    """Read ZT411 device identity via SNMP.
 
-    Queries both standard Printer-MIB and Zebra enterprise OIDs.
-    Returns output dict with keys: printer_status, hr_status, model,
-    firmware, serial, mac, sys_descr.
+    Returns identity-only data (model, firmware, serial, sysDescr,
+    sysName). For live state (idle / paused / fault / consumables) use
+    snmp_zt411_physical_flags(), snmp_zt411_consumables(),
+    snmp_zt411_alerts(), and ipp_get_attributes() instead.
+
+    Verified against ZT411 firmware V92.21.39Z (Phase 2, 2026-04-27 +
+    Phase 3 sub-phases 2.3/2.4, 2026-04-28).
+
+    Notes on what this function deliberately does NOT read:
+      - HR_DEVICE_STATUS (1.3.6.1.2.1.25.3.2.1.5.1) always returns 1
+        ("unknown") on this firmware; not informative.
+      - Standard Printer-MIB OIDs (1.3.6.1.2.1.43.*) are not
+        implemented on this firmware (zero rows on walk).
+
+    Returns output dict with keys: sys_descr, sys_name, zbr_model,
+    zbr_firmware, zbr_serial, zbr_link_os, zbr_mfg.
+    Each value is None if the corresponding OID could not be read.
     """
     o = ZT411OIDs
     results: Dict[str, Any] = {}
+    sources_queried: List[str] = []
+    sources_failed: List[str] = []
 
     for key, oid in [
-        ("sys_descr", o.SYS_DESCR),
-        ("sys_name", o.SYS_NAME),
-        ("hr_status", o.HR_DEVICE_STATUS),
-        ("prt_name", o.PRT_GENERAL_PRINTER_NAME),
-        ("zbr_model", o.ZBR_MODEL),
+        ("sys_descr",    o.SYS_DESCR),
+        ("sys_name",     o.SYS_NAME),
+        ("zbr_model",    o.ZBR_MODEL),
         ("zbr_firmware", o.ZBR_FIRMWARE),
-        ("zbr_serial", o.ZBR_SERIAL),
+        ("zbr_serial",   o.ZBR_SERIAL),
+        ("zbr_link_os",  o.ZBR_LINK_OS),
+        ("zbr_mfg",      o.ZBR_MFG),
     ]:
+        sources_queried.append(key)
         r = snmp_get(ip, oid, community)
-        if r.success and r.output:
+        if r.success and r.output is not None:
             results[key] = r.output.get("value")
+        else:
+            results[key] = None
+            sources_failed.append(key)
 
-    # Map hrPrinterStatus integer to string
-    _hr_map = {3: "idle", 4: "printing", 5: "warmup", 1: "other", 2: "unknown"}
-    if "hr_status" in results:
-        try:
-            results["printer_status"] = _hr_map.get(int(results["hr_status"]), "unknown")
-        except (TypeError, ValueError):
-            results["printer_status"] = "unknown"
+    # If everything failed, the device is unreachable / SNMP is wrong.
+    success = any(v is not None for v in results.values())
 
-    if not results:
-        return ToolResult(success=False, error="no SNMP response from device")
-    return ToolResult(success=True, output=results)
+    return ToolResult(
+        success=success,
+        output={
+            **results,
+            "sources_queried": sources_queried,
+            "sources_failed":  sources_failed,
+        },
+        error=(
+            None if success
+            else f"all SNMP identity queries failed (sources: {sources_queried})"
+        ),
+    )
 
 def snmp_zt411_physical_flags(
     ip: str,
