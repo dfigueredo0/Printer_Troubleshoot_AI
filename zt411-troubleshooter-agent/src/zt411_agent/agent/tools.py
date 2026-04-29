@@ -674,7 +674,7 @@ def snmp_zt411_status(
     for key, oid in [
         ("sys_descr", o.SYS_DESCR),
         ("sys_name", o.SYS_NAME),
-        ("hr_status", o.HR_PRINTER_STATUS),
+        ("hr_status", o.HR_DEVICE_STATUS),
         ("prt_name", o.PRT_GENERAL_PRINTER_NAME),
         ("zbr_model", o.ZBR_MODEL),
         ("zbr_firmware", o.ZBR_FIRMWARE),
