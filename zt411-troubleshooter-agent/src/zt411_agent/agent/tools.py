@@ -236,14 +236,14 @@ class ZT411OIDs:
     #   - alert table row with group=1, code=11 AND no other severity>=3 alerts
     ZBR_PAUSED = None
 
-    # --- State bitmask (verified) ---
-    # Format: 's1,s2,HHHHHHHH_part1,HHHHHHHH_part2'
-    # Part 1 = physical fault bits (OR'd):
-    #   0x01 = MEDIA_OUT, 0x02 = RIBBON_OUT, 0x04 = HEAD_OPEN
-    # Part 2 = composite "not-ready" bit:
-    #   0x10000 = printer is in any not-ready state (faults OR pause)
+    # State bitmask format: 's1,s2,RESERVED,STATE_HEX'
+    # Field 3 (STATE_HEX) holds the live state bits:
+    #   0x00001 = MEDIA_OUT
+    #   0x00002 = RIBBON_OUT
+    #   0x00004 = HEAD_OPEN
+    #   0x10000 = composite "not-ready" (set on any fault OR pause)
+    # Multiple bits OR together. Pause sets only 0x10000.
     ZBR_STATE_BITMASK = "1.3.6.1.4.1.10642.2.10.3.7.0"
-    ZBR_STATE_BITMASK_LONG = "1.3.6.1.4.1.10642.2.10.3.6.0"  # same data + padding
 
     ZBR_BIT_MEDIA_OUT  = 0x01
     ZBR_BIT_RIBBON_OUT = 0x02
@@ -499,12 +499,41 @@ def oui_vendor(mac: str) -> ToolResult:
 # SNMP helpers
 # ---------------------------------------------------------------------------
 
-def _snmp_available() -> bool:
+def _detect_pysnmp_status() -> Tuple[bool, Optional[str]]:
+    """Probe whether ``pysnmp.hlapi.v3arch.asyncio`` can actually be
+    imported, and return a precise error message when it can't.
+
+    The motivating failure mode: pysnmp 7.x's ``pysnmp/hlapi/__init__.py``
+    unconditionally imports the standard-library ``asyncore`` module,
+    which was removed in Python 3.13. Even though the live tools below
+    use the asyncio-based namespace, Python's package-init chain forces
+    the broken ``asyncore`` import to run first, so callers see an
+    opaque ``ModuleNotFoundError`` and the previous error message
+    ("pysnmp hlapi unavailable") points at the wrong layer.
+    """
     try:
-        import pysnmp 
-        return True
-    except ImportError:
-        return False
+        import pysnmp.hlapi.v3arch.asyncio  # noqa: F401
+        return True, None
+    except ModuleNotFoundError as exc:
+        if exc.name == "asyncore":
+            return False, (
+                "pysnmp 7.x requires Python <3.13 (its hlapi module imports "
+                "the removed stdlib 'asyncore'). Downgrade Python to 3.12.x, "
+                "upgrade pysnmp once a fixed release exists, or install the "
+                "'pyasyncore' polyfill into the active environment."
+            )
+        return False, f"pysnmp hlapi unavailable: missing module {exc.name!r}"
+    except ImportError as exc:
+        return False, f"pysnmp hlapi unavailable: {exc}"
+
+
+_PYSNMP_AVAILABLE: bool
+_PYSNMP_ERROR: Optional[str]
+_PYSNMP_AVAILABLE, _PYSNMP_ERROR = _detect_pysnmp_status()
+
+
+def _snmp_available() -> bool:
+    return _PYSNMP_AVAILABLE
 
 def _parse_snmp_value(value: Any) -> Any:
     if hasattr(value, "asOctets"):
@@ -533,21 +562,18 @@ def snmp_get(
     """
     import asyncio
 
-    if not _snmp_available():
-        return ToolResult(success=False, error="pysnmp not installed")
+    if not _PYSNMP_AVAILABLE:
+        return ToolResult(success=False, error=_PYSNMP_ERROR or "pysnmp unavailable")
 
-    try:
-        from pysnmp.hlapi.v3arch.asyncio import (
-            CommunityData,
-            ContextData,
-            ObjectIdentity,
-            ObjectType,
-            SnmpEngine,
-            UdpTransportTarget,
-            get_cmd,
-        )
-    except ImportError:
-        return ToolResult(success=False, error="pysnmp hlapi unavailable")
+    from pysnmp.hlapi.v3arch.asyncio import (
+        CommunityData,
+        ContextData,
+        ObjectIdentity,
+        ObjectType,
+        SnmpEngine,
+        UdpTransportTarget,
+        get_cmd,
+    )
 
     async def _do_get():
         transport = await UdpTransportTarget.create(
@@ -602,21 +628,18 @@ def snmp_walk(
     """
     import asyncio
 
-    if not _snmp_available():
-        return ToolResult(success=False, error="pysnmp not installed")
+    if not _PYSNMP_AVAILABLE:
+        return ToolResult(success=False, error=_PYSNMP_ERROR or "pysnmp unavailable")
 
-    try:
-        from pysnmp.hlapi.v3arch.asyncio import (
-            CommunityData,
-            ContextData,
-            ObjectIdentity,
-            ObjectType,
-            SnmpEngine,
-            UdpTransportTarget,
-            walk_cmd,
-        )
-    except ImportError:
-        return ToolResult(success=False, error="pysnmp hlapi unavailable")
+    from pysnmp.hlapi.v3arch.asyncio import (
+        CommunityData,
+        ContextData,
+        ObjectIdentity,
+        ObjectType,
+        SnmpEngine,
+        UdpTransportTarget,
+        walk_cmd,
+    )
 
     async def _do_walk() -> Tuple[List[Dict[str, Any]], Optional[str]]:
         collected: List[Dict[str, Any]] = []
@@ -748,8 +771,7 @@ def snmp_zt411_physical_flags(
             # False = pause is auto-emitted alongside another fault
             # None  = not paused, or could not be determined
         'raw_bitmask': str,
-        'bits_set_part1': str,
-        'bits_set_part2': str,
+        'bits': str,
     }
     """
     o = ZT411OIDs
@@ -779,8 +801,7 @@ def snmp_zt411_physical_flags(
         )
 
     try:
-        bits_part1 = int(parts[2], 16)
-        bits_part2 = int(parts[3], 16)
+        bits = int(parts[3], 16)
     except ValueError:
         return ToolResult(
             success=False,
@@ -788,17 +809,17 @@ def snmp_zt411_physical_flags(
             error=f"could not parse hex from bitmask: parts={parts!r}",
         )
 
-    flags["media_out"]  = bool(bits_part1 & o.ZBR_BIT_MEDIA_OUT)
-    flags["ribbon_out"] = bool(bits_part1 & o.ZBR_BIT_RIBBON_OUT)
-    flags["head_open"]  = bool(bits_part1 & o.ZBR_BIT_HEAD_OPEN)
+    flags["media_out"]  = bool(bits & o.ZBR_BIT_MEDIA_OUT)
+    flags["ribbon_out"] = bool(bits & o.ZBR_BIT_RIBBON_OUT)
+    flags["head_open"]  = bool(bits & o.ZBR_BIT_HEAD_OPEN)
 
     # Pause: composite bit in part 2 is set whenever printer is not-ready,
     # which includes pause AND physical faults. So "paused" = the bit is
     # set AND no physical-fault bit is set in part 1... OR the alert table
     # contains a code=11 row, which is the more reliable indicator.
-    not_ready = bool(bits_part2 & o.ZBR_BIT_NOT_READY)
+    not_ready = bool(bits & o.ZBR_BIT_NOT_READY)
     has_physical_fault = bool(
-        bits_part1 & (o.ZBR_BIT_MEDIA_OUT | o.ZBR_BIT_RIBBON_OUT | o.ZBR_BIT_HEAD_OPEN)
+        bits & (o.ZBR_BIT_MEDIA_OUT | o.ZBR_BIT_RIBBON_OUT | o.ZBR_BIT_HEAD_OPEN)
     )
 
     # Cross-check the alert table for an active pause entry (code=11).
@@ -823,8 +844,7 @@ def snmp_zt411_physical_flags(
         output={
             **flags,
             "raw_bitmask":     raw,
-            "bits_set_part1":  hex(bits_part1),
-            "bits_set_part2":  hex(bits_part2),
+            "bits":  hex(bits),
         },
     )
 

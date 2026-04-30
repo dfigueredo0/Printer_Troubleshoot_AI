@@ -18,8 +18,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from src.zt411_agent.agent.orchestrator import Orchestrator
-from src.zt411_agent.state import (
+from zt411_agent.agent.orchestrator import Orchestrator
+from zt411_agent.state import (
     AgentState,
     ActionStatus,
     LoopStatus,
@@ -215,7 +215,7 @@ class TestSuccessPath:
         validator = _mock_specialist("validation_specialist", utility=0.9)
 
         # Let the real validation specialist confirm success
-        from src.zt411_agent.agent.validation_specialist import ValidationSpecialist
+        from zt411_agent.agent.validation_specialist import ValidationSpecialist
 
         real_validator = ValidationSpecialist()
         state = _state()
@@ -227,7 +227,7 @@ class TestSuccessPath:
 
     def test_success_not_declared_without_evidence(self):
         """Hallucination guard must reset flags set without tool evidence."""
-        from src.zt411_agent.agent.validation_specialist import ValidationSpecialist
+        from zt411_agent.agent.validation_specialist import ValidationSpecialist
 
         def _fake_success(state: AgentState):
             # Set flags but add NO real tool evidence
@@ -297,7 +297,7 @@ class TestAuditTrail:
 class TestConfirmationTokens:
     def test_risky_action_issues_token(self):
         """A pending action with DESTRUCTIVE risk must get a confirmation token."""
-        from src.zt411_agent.agent.validation_specialist import ValidationSpecialist
+        from zt411_agent.agent.validation_specialist import ValidationSpecialist
 
         def _log_risky(state: AgentState):
             state.log_action(
@@ -319,7 +319,7 @@ class TestConfirmationTokens:
 
     def test_safe_action_does_not_issue_token(self):
         """A SAFE action should be auto-approved without a confirmation token."""
-        from src.zt411_agent.agent.validation_specialist import ValidationSpecialist
+        from zt411_agent.agent.validation_specialist import ValidationSpecialist
 
         def _log_safe(state: AgentState):
             state.log_action(

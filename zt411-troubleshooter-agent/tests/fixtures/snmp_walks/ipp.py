@@ -1,6 +1,6 @@
 import json
 from datetime import datetime, timezone
-from src.zt411_agent.agent.tools import snmp_walk, ipp_get_attributes
+from zt411_agent.agent.tools import snmp_walk, ipp_get_attributes
 
 IP = "192.168.99.10"
 

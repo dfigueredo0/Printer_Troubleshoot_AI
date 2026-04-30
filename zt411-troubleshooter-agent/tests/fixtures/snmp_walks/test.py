@@ -1,4 +1,4 @@
-from src.zt411_agent.agent.tools import snmp_walk
+from zt411_agent.agent.tools import snmp_walk
 import json
 from datetime import datetime, timezone
 

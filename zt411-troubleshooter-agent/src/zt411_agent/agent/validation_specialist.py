@@ -187,6 +187,39 @@ class ValidationSpecialist(Specialist):
                 ).evidence_id
             )
 
+        # ------------------------------------------------------------------
+        # 5. Loop-termination check — short-circuit on repeated human-action
+        #    recommendation
+        # ------------------------------------------------------------------
+        # When a worker specialist has logged a SAFE/LOW-risk recommendation
+        # whose result is "Awaiting human action..." and an entire prior
+        # loop iteration has elapsed without the underlying physical
+        # condition clearing, the loop is stuck — the planner has nothing
+        # new to plan, the worker keeps re-emitting the same recommendation,
+        # and we eventually escalate with a misleading
+        # "max_loop_steps exceeded" reason. Detect this and escalate with
+        # an honest reason instead, before the cap fires.
+        triggering_entry = self._find_repeated_human_action_entry(state)
+        if triggering_entry is not None:
+            state.loop_status = LoopStatus.ESCALATED
+            state.escalation_reason = "awaiting_human_action"
+            ev = state.add_evidence(
+                specialist=self.name,
+                source="validation_short_circuit",
+                content=(
+                    f"Awaiting human action on prior recommendation "
+                    f"(entry_id={triggering_entry.entry_id}, "
+                    f"specialist={triggering_entry.specialist}, "
+                    f"action={triggering_entry.action!r}). Underlying "
+                    f"condition still present after {state.loop_counter} "
+                    f"loop step(s); escalating instead of cycling further."
+                ),
+            )
+            evidence_items.append(ev.evidence_id)
+            actions_taken.append(
+                f"short-circuit: awaiting human action on {triggering_entry.entry_id}"
+            )
+
         state.log_action(
             specialist=self.name,
             action="; ".join(actions_taken) or "validation pass — nothing pending",
@@ -204,6 +237,55 @@ class ValidationSpecialist(Specialist):
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+
+    def _find_repeated_human_action_entry(
+        self, state: AgentState
+    ) -> ActionLogEntry | None:
+        """Return an action_log entry matching the "stuck on human action"
+        pattern, or None if the loop is not stuck.
+
+        The pattern: a worker specialist (not validation itself) has logged
+        a SAFE/LOW-risk action whose ``result`` contains "awaiting human
+        action", at least one full prior loop iteration has completed, and
+        the physical condition that triggered the recommendation is still
+        present in ``state.device``. The presence of an outstanding
+        recommendation that the human hasn't acted on, after a complete
+        loop has cycled through every other specialist with no new
+        information, is the terminal signal the orchestrator currently
+        misses.
+
+        Returning the triggering entry (instead of just a bool) lets the
+        caller cite which recommendation the loop is stuck on, which
+        matters for the audit trail.
+        """
+        if state.loop_counter < 2:
+            return None
+
+        # The condition the recommendation is asking the human to fix must
+        # still be observable. If it has cleared, the worker will stop
+        # emitting the recommendation on its own and we shouldn't pre-empt
+        # a clean success path.
+        physical_condition_active = (
+            state.device.paused is True
+            or state.device.head_open is True
+            or state.device.media_out is True
+            or state.device.ribbon_out is True
+        )
+        if not physical_condition_active:
+            return None
+
+        candidates = [
+            a for a in state.action_log
+            if a.specialist != self.name
+            and a.risk in {RiskLevel.SAFE, RiskLevel.LOW}
+            and a.status in {ActionStatus.PENDING, ActionStatus.CONFIRMED}
+            and "awaiting human action" in (a.result or "").lower()
+        ]
+        if not candidates:
+            return None
+
+        # Most recent triggering entry — that's the one we cite.
+        return candidates[-1]
 
     def _evaluate_action(
         self, entry: ActionLogEntry, state: AgentState

@@ -15,7 +15,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from src.zt411_agent.planner import (
+from zt411_agent.planner import (
     PlannerResponse,
     RagSnippet,
     RuntimeTier,
@@ -26,7 +26,7 @@ from src.zt411_agent.planner import (
     build_planner,
     detect_runtime_tier,
 )
-from src.zt411_agent.state import AgentState, OSPlatform
+from zt411_agent.state import AgentState, OSPlatform
 
 
 # ---------------------------------------------------------------------------
@@ -483,7 +483,7 @@ class TestOrchestratorPlannerWiring:
         return spec
 
     def test_orchestrator_selects_planner_top_pick(self):
-        from src.zt411_agent.agent.orchestrator import Orchestrator
+        from zt411_agent.agent.orchestrator import Orchestrator
 
         device_spec = self._make_mock_specialist("device_specialist", utility=0.8)
         network_spec = self._make_mock_specialist("network_specialist", utility=0.3)
@@ -508,8 +508,8 @@ class TestOrchestratorPlannerWiring:
         device_spec.act.assert_called_once()
 
     def test_orchestrator_escalates_when_no_utility(self):
-        from src.zt411_agent.agent.orchestrator import Orchestrator
-        from src.zt411_agent.state import LoopStatus
+        from zt411_agent.agent.orchestrator import Orchestrator
+        from zt411_agent.state import LoopStatus
 
         low_spec = self._make_mock_specialist("device_specialist", utility=0.0)
         validator = self._make_mock_specialist("validation_specialist", utility=0.0)

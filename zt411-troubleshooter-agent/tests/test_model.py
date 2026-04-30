@@ -1,4 +1,4 @@
-from src.zt411_agent.models.baseline import BaselineModel
+from zt411_agent.models.baseline import BaselineModel
 
 
 def test_predict():

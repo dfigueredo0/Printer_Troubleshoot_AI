@@ -15,10 +15,10 @@ from pathlib import Path
 
 import pytest
 
-from src.zt411_agent.data.dataset import SampleCase, TroubleshootingDataset
-from src.zt411_agent.data.loader import DataLoader
-from src.zt411_agent.data.split import split_dataset
-from src.zt411_agent.data.transforms import (
+from zt411_agent.data.dataset import SampleCase, TroubleshootingDataset
+from zt411_agent.data.loader import DataLoader
+from zt411_agent.data.split import split_dataset
+from zt411_agent.data.transforms import (
     compose,
     default_transform,
     normalise_platform,
@@ -277,7 +277,7 @@ class TestTransforms:
         assert all(s == s.lower() for s in result.symptoms)
 
     def test_to_agent_input_maps_platform(self):
-        from src.zt411_agent.state import OSPlatform
+        from zt411_agent.state import OSPlatform
         ai = to_agent_input(self._case(os_platform="windows"))
         assert ai["os_platform"] == OSPlatform.WINDOWS
 
