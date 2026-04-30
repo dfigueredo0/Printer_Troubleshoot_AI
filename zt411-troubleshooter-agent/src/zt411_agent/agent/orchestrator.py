@@ -36,6 +36,7 @@ from ..state import (
 )
 
 from ..planner import build_planner, PlannerFn, PlannerResponse, RagSnippet
+from ..rag.retriever import Retriever
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +45,18 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 MIN_UTILITY: float = 0.05          # below this score a specialist is skipped
+RAG_TOP_K: int = 5                 # snippets per loop iteration
+
+
+class _NullRetriever:
+    """Drop-in no-op retriever used when the planner is forced to
+    tier0. Returns ``[]`` for every call — the offline planner ignores
+    snippets, so loading the embedding model + FAISS index would be
+    wasted work.
+    """
+
+    def retrieve(self, query: str, k: int = RAG_TOP_K) -> list[RagSnippet]:  # noqa: ARG002
+        return []
 
 # ---------------------------------------------------------------------------
 # Orchestrator
@@ -67,8 +80,9 @@ class Orchestrator:
     def __init__(
         self,
         specialists: list[Specialist],
-        cfg: Any, 
+        cfg: Any,
         max_loop_steps: int = 10,
+        retriever: Retriever | None = None,
     ) -> None:
         self.specialists: dict[str, Specialist] = {s.name: s for s in specialists}
         self.max_loop_steps = max_loop_steps
@@ -81,8 +95,23 @@ class Orchestrator:
             for name, s in self.specialists.items()
             if name != "validation_specialist"
         }
-        
+
         self._planner: PlannerFn = build_planner(cfg)
+        # One Retriever per orchestrator: model + FAISS index load on
+        # first retrieve(), then stay in memory for the session. Tests
+        # pass a stub or a fixture-backed Retriever via this hook.
+        # When the caller didn't pass one AND the planner is forced to
+        # tier0, swap in a no-op retriever — the offline planner does
+        # not read snippets, so loading the embedding model + FAISS
+        # index would be wasted effort that also breaks the hermetic
+        # tests' wall-clock budget.
+        forced_tier = getattr(getattr(cfg, "runtime", None), "tier", None)
+        if retriever is not None:
+            self._retriever: Retriever = retriever
+        elif forced_tier == "tier0":
+            self._retriever = _NullRetriever()
+        else:
+            self._retriever = Retriever()
 
     # ------------------------------------------------------------------
     # Public API
@@ -106,8 +135,11 @@ class Orchestrator:
         AgentState
             Mutated state with the full audit trail.
         """
-        snippets = rag_snippets or []
-        
+        # Caller-supplied snippets are preserved as a base set; live
+        # retrieval per iteration is concatenated on top so a caller
+        # priming the loop with hand-picked docs (e.g. tests) still works.
+        base_snippets = rag_snippets or []
+
         logger.info(
             "Agent loop starting | session=%s os=%s symptoms=%s",
             state.session_id,
@@ -128,7 +160,13 @@ class Orchestrator:
                 logger.info("Success criteria met; exiting loop.")
                 break
 
-            # 3. PLAN 
+            # Build a per-iteration RAG query from the symptoms + recent
+            # evidence summary, then retrieve top-k snippets. Graceful
+            # degradation: missing index → retrieve() returns [].
+            iteration_snippets = self._retrieve_for_iteration(state)
+            snippets = base_snippets + iteration_snippets
+
+            # 3. PLAN
             plan: PlannerResponse = self._planner(state, snippets)
             logger.debug("Planner [%s]: specialists=%s rationale=%s citations=%s",
                         plan.tier_used.value,
@@ -192,6 +230,40 @@ class Orchestrator:
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+
+    def _retrieve_for_iteration(self, state: AgentState) -> list[RagSnippet]:
+        """Construct a query from the agent state and retrieve top-k
+        snippets for this iteration.
+
+        The query combines the user-supplied symptoms with a short
+        summary of the most recent evidence so the retriever sees both
+        the framing and the new tool output. The retriever's own
+        graceful-degradation path returns [] if the index is missing,
+        so this helper never raises.
+        """
+        try:
+            query = self._build_rag_query(state)
+            if not query:
+                return []
+            return self._retriever.retrieve(query, k=RAG_TOP_K)
+        except Exception as exc:  # noqa: BLE001
+            # Retrieval is advisory — never let a RAG error stop the loop.
+            logger.warning("RAG retrieval failed (returning []): %s", exc)
+            return []
+
+    def _build_rag_query(self, state: AgentState) -> str:
+        """Build a single-string query from symptoms + recent evidence."""
+        parts: list[str] = []
+        if state.symptoms:
+            parts.append(" ".join(state.symptoms))
+        if state.user_description:
+            parts.append(state.user_description)
+        # Last few evidence content snippets — bounded to keep the embedding
+        # query short enough to be informative without ballooning.
+        for ev in state.evidence[-3:]:
+            if ev.content:
+                parts.append(ev.content[:200])
+        return " ".join(p.strip() for p in parts if p.strip()).strip()
 
     def _select_specialist(
         self, state: AgentState, planner_ranking: list[str]

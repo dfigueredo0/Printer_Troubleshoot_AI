@@ -10,7 +10,6 @@ from ..state import (
     ActionStatus,
     LoopStatus,
     RiskLevel,
-    SnapshotDiff,
 )
 
 logger = logging.getLogger(__name__)
@@ -23,6 +22,45 @@ _CONFIRMATION_REQUIRED: set[RiskLevel] = {
     RiskLevel.REBOOT,
     RiskLevel.SERVICE_RESTART,
 }
+
+# High-risk actions that NEVER auto-approve and never accept a token —
+# they are held until a human flips them in some out-of-band way
+# (operator console, supervisor sign-off, etc.).
+_HIGH_RISK_HUMAN_ONLY: set[RiskLevel] = {
+    RiskLevel.DESTRUCTIVE,
+    RiskLevel.FIRMWARE,
+    RiskLevel.REBOOT,
+}
+
+# Risk levels that require an explicit confirmation token but can then
+# be flipped to APPROVED by `state.consume_confirmation_token(token)`.
+_TOKEN_REQUIRED: set[RiskLevel] = {
+    RiskLevel.SERVICE_RESTART,
+    RiskLevel.CONFIG_CHANGE,
+}
+
+# Evidence sources that legitimately back queue_drained.
+# Live tools currently emit these names; planner-generated content
+# (e.g. anything containing "proposed" or "rag_") never qualifies.
+_QUEUE_EVIDENCE_SOURCES: set[str] = {
+    "ps_enum_jobs",      # Windows PowerShell EnumJobs (live)
+    "enum_jobs",         # WindowsSpecialist (current implementation)
+    "lpstat_jobs",       # CUPSSpecialist `lpstat -o`
+}
+
+# Evidence sources that legitimately back test_print_ok. There is no
+# production code emitting these yet — a test print sub-flow is Phase 4.
+# Listed here so the validator recognises them when they appear.
+_TEST_PRINT_EVIDENCE_SOURCES: set[str] = {
+    "ps_test_print",
+    "test_print",
+}
+
+# Boot-only informational alert that must be tolerated when judging
+# device_ready. The ZT411 firmware emits alert:1.15 ("printer power on")
+# on every boot and never clears it without a power cycle, so requiring
+# zero error_codes would block ready forever.
+_TOLERATED_BOOT_ALERTS: set[str] = {"alert:1.15"}
 
 
 class ValidationSpecialist(Specialist):
@@ -75,10 +113,12 @@ class ValidationSpecialist(Specialist):
 
     def act(self, state: AgentState) -> dict[str, Any]:
         """
-        1. Check all pending actions for guardrail violations.
-        2. Approve safe actions; hold/reject risky ones without a token.
-        3. Evaluate observable success criteria.
-        4. Record snapshot diffs for the audit trail.
+        1. Risk-tiered guardrail pass over PENDING actions.
+        2. Three-flag success-criteria evaluation, evidence-grounded.
+        3. Hallucination guard: any flag set without backing evidence is reset
+           and an audit-trail evidence item is emitted.
+        4. Snapshot diffs for any state field that flipped this turn.
+        5. Loop short-circuit when the loop is stuck on a human-action recommendation.
         """
         logger.info("ValidationSpecialist acting on session %s", state.session_id)
 
@@ -86,77 +126,31 @@ class ValidationSpecialist(Specialist):
         evidence_items: list[str] = []
 
         # ------------------------------------------------------------------
-        # 1. Guardrail pass — review pending actions
+        # 1. Guardrail pass — risk-tiered review of pending actions
         # ------------------------------------------------------------------
         pending_actions = [a for a in state.action_log if a.status == ActionStatus.PENDING]
 
         for entry in pending_actions:
-            verdict, reason = self._evaluate_action(entry, state)
-            if verdict == "approve":
-                entry.status = ActionStatus.CONFIRMED
-                ev = state.add_evidence(
-                    specialist=self.name,
-                    source="guardrail_approved",
-                    content=f"APPROVED: {entry.action} — {reason}",
-                )
-                evidence_items.append(ev.evidence_id)
-                actions_taken.append(f"approved: {entry.action}")
-            elif verdict == "hold":
-                # Leave as PENDING; issue a confirmation token if not already issued
-                if not entry.confirmation_token:
-                    token = state.issue_confirmation_token(entry.entry_id)
-                    entry.confirmation_token = token
-                ev = state.add_evidence(
-                    specialist=self.name,
-                    source="guardrail_hold",
-                    content=f"HOLD (needs human confirmation): {entry.action} — {reason}. Token: {entry.confirmation_token}",
-                )
-                evidence_items.append(ev.evidence_id)
-                actions_taken.append(f"hold (token issued): {entry.action}")
-            else:  # reject
-                entry.status = ActionStatus.SKIPPED
-                ev = state.add_evidence(
-                    specialist=self.name,
-                    source="guardrail_rejected",
-                    content=f"REJECTED: {entry.action} — {reason}",
-                )
-                evidence_items.append(ev.evidence_id)
-                actions_taken.append(f"rejected: {entry.action}")
+            self._apply_guardrail(entry, state, evidence_items, actions_taken)
 
         # ------------------------------------------------------------------
-        # 2. Hallucination guard — refuse success claims without tool output
-        # ------------------------------------------------------------------
-        if state.queue_drained or state.test_print_ok or state.device_ready:
-            # Verify each success flag has at least one backing evidence item
-            # from a real tool output (not a proposed/pending action).
-            real_sources = {ev.source for ev in state.evidence if "proposed" not in ev.source}
-            if not real_sources:
-                logger.warning(
-                    "Success flags set but NO real tool evidence found — resetting flags."
-                )
-                state.queue_drained = False
-                state.test_print_ok = False
-                state.device_ready = False
-                ev = state.add_evidence(
-                    specialist=self.name,
-                    source="hallucination_guard",
-                    content="Success flags reset: no observable tool output to support success claim.",
-                )
-                evidence_items.append(ev.evidence_id)
-                actions_taken.append("reset unsubstantiated success flags")
-
-        # ------------------------------------------------------------------
-        # 3. Evaluate observable success criteria
-        #    (stub — replace conditions with real signal checks)
+        # 2. Three-flag success-criteria evaluation, evidence-grounded
         # ------------------------------------------------------------------
         self._check_success_criteria(state, evidence_items, actions_taken)
 
         # ------------------------------------------------------------------
-        # 4. Snapshot diff — record before/after for any state change this turn
+        # 3. Hallucination guard — reset any flag whose backing evidence is
+        #    missing.  This is the gate that keeps a planner that returned
+        #    success_criteria_met=true from sneaking past the validator: even
+        #    if some other path flipped state.queue_drained / device_ready /
+        #    test_print_ok, we re-prove each one against the evidence here
+        #    and unflip anything that doesn't hold up.
         # ------------------------------------------------------------------
-        # The orchestrator will compare state at the start/end of the loop;
-        # here we record any field-level diffs we can observe locally.
-        # Example: queue length before vs after
+        self._hallucination_guard(state, evidence_items, actions_taken)
+
+        # ------------------------------------------------------------------
+        # 4. Snapshot diffs — record observable state changes this turn
+        # ------------------------------------------------------------------
         if state.cups.pending_jobs == 0 and state.cups.queue_name:
             diff = state.record_diff(
                 field="cups.pending_jobs",
@@ -238,6 +232,248 @@ class ValidationSpecialist(Specialist):
     # Internal helpers
     # ------------------------------------------------------------------
 
+    def _apply_guardrail(
+        self,
+        entry: ActionLogEntry,
+        state: AgentState,
+        evidence_items: list[str],
+        actions_taken: list[str],
+    ) -> None:
+        """Risk-tiered guardrail decision for a single PENDING action.
+
+        Three branches per the architecture spec:
+
+        * High-risk human-only (DESTRUCTIVE / FIRMWARE / REBOOT): leave the
+          action PENDING, emit ``validation_guardrail_high_risk`` evidence
+          explaining what blocked. Never auto-approves and never accepts a
+          token — escalation path only.
+        * Token-required (SERVICE_RESTART / CONFIG_CHANGE): leave PENDING,
+          issue a confirmation token via ``state.issue_confirmation_token``,
+          attach to the entry, emit ``validation_guardrail_token`` evidence
+          including the token ID. The human can later flip the action by
+          calling ``state.consume_confirmation_token(token)``.
+        * SAFE / LOW: auto-approve (status → CONFIRMED), emit
+          ``guardrail_approved`` evidence (existing source name kept for
+          back-compat with prior tests).
+        """
+        risk = entry.risk
+
+        if risk in _HIGH_RISK_HUMAN_ONLY:
+            ev = state.add_evidence(
+                specialist=self.name,
+                source="validation_guardrail_high_risk",
+                content=(
+                    f"HOLD (high-risk human approval required): "
+                    f"action={entry.action!r} risk={risk.value} "
+                    f"entry_id={entry.entry_id}. Will not auto-approve and "
+                    f"will not accept a confirmation token; escalation "
+                    f"required."
+                ),
+            )
+            evidence_items.append(ev.evidence_id)
+            actions_taken.append(
+                f"hold (high-risk, human only): {entry.action}"
+            )
+            return
+
+        if risk in _TOKEN_REQUIRED:
+            if not entry.confirmation_token:
+                token = state.issue_confirmation_token(entry.entry_id)
+                entry.confirmation_token = token
+            ev = state.add_evidence(
+                specialist=self.name,
+                source="validation_guardrail_token",
+                content=(
+                    f"HOLD (confirmation token required): "
+                    f"action={entry.action!r} risk={risk.value} "
+                    f"entry_id={entry.entry_id} "
+                    f"token={entry.confirmation_token}. "
+                    f"Call state.consume_confirmation_token(token) to "
+                    f"approve."
+                ),
+            )
+            evidence_items.append(ev.evidence_id)
+            actions_taken.append(f"hold (token issued): {entry.action}")
+            return
+
+        if risk in {RiskLevel.SAFE, RiskLevel.LOW}:
+            entry.status = ActionStatus.CONFIRMED
+            ev = state.add_evidence(
+                specialist=self.name,
+                source="guardrail_approved",
+                content=(
+                    f"APPROVED: {entry.action} — risk={risk.value} within "
+                    f"auto-approve threshold"
+                ),
+            )
+            evidence_items.append(ev.evidence_id)
+            actions_taken.append(f"approved: {entry.action}")
+            return
+
+        # Unknown / MEDIUM / future risk levels — conservative HOLD with
+        # token. Better to ask than guess.
+        if not entry.confirmation_token:
+            token = state.issue_confirmation_token(entry.entry_id)
+            entry.confirmation_token = token
+        ev = state.add_evidence(
+            specialist=self.name,
+            source="validation_guardrail_token",
+            content=(
+                f"HOLD (unrecognised risk class — defaulting to token): "
+                f"action={entry.action!r} risk={risk.value} "
+                f"entry_id={entry.entry_id} "
+                f"token={entry.confirmation_token}."
+            ),
+        )
+        evidence_items.append(ev.evidence_id)
+        actions_taken.append(f"hold (token, fallback): {entry.action}")
+
+    def _check_success_criteria(
+        self,
+        state: AgentState,
+        evidence_items: list[str],
+        actions_taken: list[str],
+    ) -> None:
+        """Set queue_drained / device_ready / test_print_ok ONLY when
+        backed by real tool-source evidence.
+
+        These are positive checks: each flag is only flipped to True when
+        the corresponding evidence is present. The hallucination guard
+        runs after this and resets any flag the planner / external code
+        flipped without backing evidence.
+        """
+        # queue_drained: at least one evidence item from a live job-listing
+        # tool indicating zero pending jobs.
+        if not state.queue_drained and self._queue_drained_supported(state):
+            state.queue_drained = True
+            ev = state.add_evidence(
+                specialist=self.name,
+                source="success_check",
+                content=(
+                    "queue_drained confirmed: backing evidence from "
+                    f"{sorted(_QUEUE_EVIDENCE_SOURCES)} present and "
+                    "indicates zero pending jobs."
+                ),
+            )
+            evidence_items.append(ev.evidence_id)
+            actions_taken.append("confirmed queue_drained")
+
+        # device_ready: status == idle/ready AND alerts/error_codes only
+        # contain the tolerated boot informational entry.
+        if not state.device_ready and self._device_ready_supported(state):
+            state.device_ready = True
+            ev = state.add_evidence(
+                specialist=self.name,
+                source="success_check",
+                content=(
+                    f"device_ready confirmed: status={state.device.printer_status} "
+                    f"alerts={state.device.alerts} "
+                    f"error_codes={state.device.error_codes}"
+                ),
+            )
+            evidence_items.append(ev.evidence_id)
+            actions_taken.append("confirmed device_ready")
+
+        # test_print_ok: explicit test-print success evidence required.
+        if not state.test_print_ok and self._test_print_supported(state):
+            state.test_print_ok = True
+            ev = state.add_evidence(
+                specialist=self.name,
+                source="success_check",
+                content="test_print_ok confirmed: success evidence found.",
+            )
+            evidence_items.append(ev.evidence_id)
+            actions_taken.append("confirmed test_print_ok")
+
+        if state.is_resolved():
+            logger.info("All success criteria confirmed by validation specialist.")
+
+    def _queue_drained_supported(self, state: AgentState) -> bool:
+        """Is there at least one job-listing evidence item with content
+        indicating zero pending jobs?
+        """
+        for ev in state.evidence:
+            if ev.source not in _QUEUE_EVIDENCE_SOURCES:
+                continue
+            content = (ev.content or "").lower()
+            # Heuristic match. The two production sources phrase it as
+            #   lpstat_jobs    : "0 pending jobs ..."
+            #   enum_jobs      : "no print jobs in queue ..."
+            # A future ps_enum_jobs would phrase it similarly. We accept
+            # any of the common zero-job phrasings.
+            zero_indicators = (
+                "0 pending",
+                "no pending",
+                "no print jobs",
+                "0 jobs",
+                "queue empty",
+                "pending_jobs=0",
+                "pending=0",
+            )
+            if any(ind in content for ind in zero_indicators):
+                return True
+        return False
+
+    def _device_ready_supported(self, state: AgentState) -> bool:
+        if state.device.printer_status not in {"idle", "ready"}:
+            return False
+        if state.device.alerts:
+            return False
+        # error_codes may contain the boot informational entry; nothing else.
+        residual = [
+            code for code in state.device.error_codes
+            if code not in _TOLERATED_BOOT_ALERTS
+        ]
+        return not residual
+
+    def _test_print_supported(self, state: AgentState) -> bool:
+        for ev in state.evidence:
+            if ev.source not in _TEST_PRINT_EVIDENCE_SOURCES:
+                continue
+            if "success" in (ev.content or "").lower():
+                return True
+        return False
+
+    def _hallucination_guard(
+        self,
+        state: AgentState,
+        evidence_items: list[str],
+        actions_taken: list[str],
+    ) -> None:
+        """Reset any success flag that lacks backing evidence and emit a
+        ``validation_hallucination_guard`` audit item per reset.
+
+        Runs AFTER ``_check_success_criteria``, so a flag we just set on
+        valid evidence stays True. A flag that was set externally
+        (planner, another specialist) and we cannot re-prove gets reset.
+        """
+        missing: list[str] = []
+
+        if state.queue_drained and not self._queue_drained_supported(state):
+            state.queue_drained = False
+            missing.append("queue_drained")
+
+        if state.device_ready and not self._device_ready_supported(state):
+            state.device_ready = False
+            missing.append("device_ready")
+
+        if state.test_print_ok and not self._test_print_supported(state):
+            state.test_print_ok = False
+            missing.append("test_print_ok")
+
+        if missing:
+            ev = state.add_evidence(
+                specialist=self.name,
+                source="validation_hallucination_guard",
+                content=(
+                    f"Reset {missing} — flag(s) were set but no "
+                    f"backing tool-output evidence found. Loop will not be "
+                    f"marked resolved this turn."
+                ),
+            )
+            evidence_items.append(ev.evidence_id)
+            actions_taken.append(f"hallucination guard: reset {missing}")
+
     def _find_repeated_human_action_entry(
         self, state: AgentState
     ) -> ActionLogEntry | None:
@@ -286,102 +522,3 @@ class ValidationSpecialist(Specialist):
 
         # Most recent triggering entry — that's the one we cite.
         return candidates[-1]
-
-    def _evaluate_action(
-        self, entry: ActionLogEntry, state: AgentState
-    ) -> tuple[str, str]:
-        """
-        Returns ("approve" | "hold" | "reject", reason_string).
-
-        Rules (ordered by precedence):
-        1. Destructive / firmware / reboot → always HOLD for human confirmation.
-        2. Service restart / config change → HOLD unless allow_elevation is set in config.
-        3. Safe / low risk → APPROVE.
-        4. Privilege check: driver/port/firmware changes need admin flag.
-        """
-        risk = entry.risk
-
-        # 1. Always-hold categories
-        if risk in {RiskLevel.DESTRUCTIVE, RiskLevel.FIRMWARE, RiskLevel.REBOOT}:
-            return "hold", f"risk={risk.value} requires explicit human confirmation"
-
-        # 2. Service restart / config change — hold unless config allows
-        if risk in {RiskLevel.SERVICE_RESTART, RiskLevel.CONFIG_CHANGE}:
-            # TODO: read allow_service_restart from loaded runtime config
-            # For now, always hold these for safety
-            return "hold", f"risk={risk.value} requires confirmation token"
-
-        # 3. Safe or low risk — approve
-        if risk in {RiskLevel.SAFE, RiskLevel.LOW}:
-            return "approve", f"risk={risk.value} within auto-approve threshold"
-
-        # 4. Default: hold unknown risk levels
-        return "hold", f"unknown risk level {risk.value} — defaulting to hold"
-
-    def _check_success_criteria(
-        self,
-        state: AgentState,
-        evidence_items: list[str],
-        actions_taken: list[str],
-    ) -> None:
-        """
-        Observable signals needed to confirm each success criterion.
-
-        All three must be confirmed with real tool output (not just flags) before
-        we set the success flags.  This is a stub — replace with actual queries.
-        """
-        # queue_drained: CUPS or Windows queue has 0 pending jobs
-        if not state.queue_drained:
-            cups_clear = state.cups.queue_name and state.cups.pending_jobs == 0
-            win_clear = state.windows.queue_name and state.windows.pending_jobs == 0
-            if cups_clear or win_clear:
-                # TODO: verify with a live lpstat / EnumJobs call before setting
-                # For now, only set if we have at least one job-related evidence entry
-                job_evidence = [
-                    e for e in state.evidence
-                    if "job" in e.source or "queue" in e.source
-                ]
-                if job_evidence:
-                    state.queue_drained = True
-                    ev = state.add_evidence(
-                        specialist=self.name,
-                        source="success_check",
-                        content="queue_drained confirmed: job count = 0, backed by tool evidence.",
-                    )
-                    evidence_items.append(ev.evidence_id)
-                    actions_taken.append("confirmed queue_drained")
-
-        # device_ready: device reports "idle" / "ready" and no active alerts
-        if not state.device_ready:
-            if (
-                state.device.printer_status in {"idle", "ready"}
-                and not state.device.alerts
-                and not state.device.error_codes
-            ):
-                state.device_ready = True
-                ev = state.add_evidence(
-                    specialist=self.name,
-                    source="success_check",
-                    content="device_ready confirmed: status=idle, no alerts, no error codes.",
-                )
-                evidence_items.append(ev.evidence_id)
-                actions_taken.append("confirmed device_ready")
-
-        # test_print_ok: requires an explicit test print result in evidence
-        if not state.test_print_ok:
-            test_evidence = [
-                e for e in state.evidence
-                if "test_print" in e.source
-            ]
-            if test_evidence and "success" in test_evidence[-1].content.lower():
-                state.test_print_ok = True
-                ev = state.add_evidence(
-                    specialist=self.name,
-                    source="success_check",
-                    content="test_print_ok confirmed: test print evidence found.",
-                )
-                evidence_items.append(ev.evidence_id)
-                actions_taken.append("confirmed test_print_ok")
-
-        if state.is_resolved():
-            logger.info("All success criteria confirmed by validation specialist.")
