@@ -316,6 +316,20 @@ ANTHROPIC_MESSAGES_URL = "https://api.anthropic.com/v1/messages"
 ANTHROPIC_API_VERSION = "2023-06-01"
 
 
+class _UsageShim:
+    """Minimal Anthropic-SDK-compatible usage object built from the JSON
+    body of a raw httpx response. The SessionBudget tracker reads
+    ``input_tokens`` / ``output_tokens`` off this shape, matching the
+    real SDK's ``response.usage`` attribute names.
+    """
+
+    __slots__ = ("input_tokens", "output_tokens")
+
+    def __init__(self, raw: dict[str, Any]) -> None:
+        self.input_tokens = int(raw.get("input_tokens", 0) or 0)
+        self.output_tokens = int(raw.get("output_tokens", 0) or 0)
+
+
 def _call_claude(
     prompt: str,
     model: str,
@@ -324,8 +338,19 @@ def _call_claude(
     timeout: float,
     require_citations: bool,
     max_retries: int,
+    on_usage: Callable[[Any], None] | None = None,
 ) -> dict[str, Any]:
-    """Call the Anthropic Messages API with retry on schema violations."""
+    """Call the Anthropic Messages API with retry on schema violations.
+
+    Parameters
+    ----------
+    on_usage : callable | None
+        Optional callback invoked with a usage shim
+        (``input_tokens`` / ``output_tokens`` attrs) after every
+        successful API request that returned billable tokens. Used by
+        the Session B.6 budget guardrail. None (the default) preserves
+        the historical behavior — no callback fires.
+    """
     headers = {
         "Content-Type": "application/json",
         "anthropic-version": ANTHROPIC_API_VERSION,
@@ -352,6 +377,17 @@ def _call_claude(
             resp = httpx.post(ANTHROPIC_MESSAGES_URL, headers=headers, json=body, timeout=timeout)
             resp.raise_for_status()
             data = resp.json()
+            # Record usage as soon as the HTTP layer succeeded; we want
+            # to count tokens for billed calls even if downstream JSON
+            # validation raises and forces a retry on the schema.
+            if on_usage is not None:
+                try:
+                    on_usage(_UsageShim(data.get("usage", {}) or {}))
+                except Exception as cb_exc:  # noqa: BLE001
+                    # The on_usage callback may legitimately raise
+                    # (e.g. SessionBudgetExceeded). Let those propagate
+                    # so the loop driver can shut down cleanly.
+                    raise cb_exc
             text = "".join(
                 block.get("text", "")
                 for block in data.get("content", [])
@@ -468,7 +504,7 @@ def _offline_plan(state: Any) -> dict[str, Any]:
 PlannerFn = Callable[[Any, list[RagSnippet]], PlannerResponse]
 
 
-def build_planner(cfg: Any) -> PlannerFn:
+def build_planner(cfg: Any, on_usage: Callable[[Any], None] | None = None) -> PlannerFn:
     """
     Factory: read runtime config, detect tier, return a ready-to-call planner fn.
 
@@ -476,6 +512,13 @@ def build_planner(cfg: Any) -> PlannerFn:
     ----------
     cfg : Settings
         Loaded settings object (from zt411_agent.settings.Settings.load()).
+    on_usage : callable | None
+        Optional callback fired with a usage object
+        (``input_tokens`` / ``output_tokens`` attrs) after every
+        successful cloud-tier API call. Used by Session B.6's
+        in-script budget guardrail. ``None`` (default) preserves the
+        historical no-op behavior. Local (Ollama) and offline (tier0)
+        paths never invoke the callback — they cost nothing to run.
 
     Returns
     -------
@@ -543,6 +586,7 @@ def build_planner(cfg: Any) -> PlannerFn:
                     timeout=claude_timeout,
                     require_citations=require_citations,
                     max_retries=json_retries,
+                    on_usage=on_usage,
                 )
                 used_tier = RuntimeTier.CLOUD
             except Exception as exc:

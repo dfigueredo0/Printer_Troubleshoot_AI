@@ -111,7 +111,7 @@ _HEAD_OPEN_CASES: list[EvalCase] = [
         expected_recommendation_keywords=["close", "head", "latch"],
         expected_risk_level="safe",
         expected_loop_status="escalated",
-        expected_escalation_reason=None,
+        expected_escalation_reason="awaiting_human_action",
     ),
     EvalCase(
         case_id="head_open_002",
@@ -121,7 +121,7 @@ _HEAD_OPEN_CASES: list[EvalCase] = [
         expected_recommendation_keywords=["close", "head"],
         expected_risk_level="safe",
         expected_loop_status="escalated",
-        expected_escalation_reason=None,
+        expected_escalation_reason="awaiting_human_action",
     ),
     EvalCase(
         case_id="head_open_no_resume_recommendation",
@@ -131,7 +131,7 @@ _HEAD_OPEN_CASES: list[EvalCase] = [
         expected_recommendation_keywords=["close", "latch"],
         expected_risk_level="safe",
         expected_loop_status="escalated",
-        expected_escalation_reason=None,
+        expected_escalation_reason="awaiting_human_action",
     ),
 ]
 
@@ -149,7 +149,7 @@ _MEDIA_OUT_CASES: list[EvalCase] = [
         expected_recommendation_keywords=["load", "media", "calibrat"],
         expected_risk_level="safe",
         expected_loop_status="escalated",
-        expected_escalation_reason=None,
+        expected_escalation_reason="awaiting_human_action",
     ),
     EvalCase(
         case_id="media_out_002",
@@ -159,7 +159,7 @@ _MEDIA_OUT_CASES: list[EvalCase] = [
         expected_recommendation_keywords=["load", "media"],
         expected_risk_level="safe",
         expected_loop_status="escalated",
-        expected_escalation_reason=None,
+        expected_escalation_reason="awaiting_human_action",
     ),
     EvalCase(
         case_id="media_out_003",
@@ -169,7 +169,7 @@ _MEDIA_OUT_CASES: list[EvalCase] = [
         expected_recommendation_keywords=["load", "calibrat"],
         expected_risk_level="safe",
         expected_loop_status="escalated",
-        expected_escalation_reason=None,
+        expected_escalation_reason="awaiting_human_action",
     ),
     EvalCase(
         case_id="media_out_004",
@@ -179,7 +179,7 @@ _MEDIA_OUT_CASES: list[EvalCase] = [
         expected_recommendation_keywords=["media"],
         expected_risk_level="safe",
         expected_loop_status="escalated",
-        expected_escalation_reason=None,
+        expected_escalation_reason="awaiting_human_action",
     ),
 ]
 
@@ -197,7 +197,7 @@ _RIBBON_OUT_CASES: list[EvalCase] = [
         expected_recommendation_keywords=["ribbon"],
         expected_risk_level="safe",
         expected_loop_status="escalated",
-        expected_escalation_reason=None,
+        expected_escalation_reason="awaiting_human_action",
     ),
     EvalCase(
         case_id="ribbon_out_002",
@@ -207,7 +207,7 @@ _RIBBON_OUT_CASES: list[EvalCase] = [
         expected_recommendation_keywords=["ribbon", "install"],
         expected_risk_level="safe",
         expected_loop_status="escalated",
-        expected_escalation_reason=None,
+        expected_escalation_reason="awaiting_human_action",
     ),
     EvalCase(
         case_id="ribbon_out_003",
@@ -217,7 +217,7 @@ _RIBBON_OUT_CASES: list[EvalCase] = [
         expected_recommendation_keywords=["ribbon"],
         expected_risk_level="safe",
         expected_loop_status="escalated",
-        expected_escalation_reason=None,
+        expected_escalation_reason="awaiting_human_action",
     ),
 ]
 

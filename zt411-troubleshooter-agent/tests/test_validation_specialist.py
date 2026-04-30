@@ -438,3 +438,186 @@ class TestShortCircuitRegression:
             "must not escalate when the underlying physical condition has "
             "cleared between iterations"
         )
+
+
+# ---------------------------------------------------------------------------
+# 1d. Session C.5 fault short-circuit
+# ---------------------------------------------------------------------------
+
+
+def _seed_iter1_for_fault(state: AgentState, recommendation: str) -> None:
+    """Mimic what DeviceSpecialist's fault branch emits during loop iter 1:
+    a ``physical_recommendations`` evidence item carrying the human-readable
+    advice, plus a high-level action_log entry summarising tool calls.
+    The fault branch deliberately does NOT log an "Awaiting human action"
+    result string — that's exactly the gap Session C.5 closes.
+    """
+    state.add_evidence(
+        specialist="device_specialist",
+        source="physical_recommendations",
+        content=recommendation,
+    )
+    state.log_action(
+        specialist="device_specialist",
+        action="snmp_zt411_status; snmp_zt411_physical_flags",
+        risk=RiskLevel.SAFE,
+        status=ActionStatus.EXECUTED,
+        result="emitted physical_recommendations evidence",
+    )
+
+
+class TestFaultShortCircuit:
+    """Session C.5: the validator escalates with awaiting_human_action when
+    a fault has been outstanding for one full prior loop iteration with no
+    progress — same outcome as the B.5 paused path, generalised to cover
+    head_open / media_out / ribbon_out fault states.
+    """
+
+    def _run_two_iterations(
+        self,
+        *,
+        flag_name: str,
+        printer_status: str,
+        recommendation: str,
+    ) -> AgentState:
+        kwargs = {
+            "head_open": None,
+            "media_out": None,
+            "ribbon_out": None,
+            "paused": None,
+        }
+        kwargs[flag_name] = True
+        state = _make_state(
+            printer_status=printer_status,
+            loop_counter=1,
+            **kwargs,
+        )
+        _seed_iter1_for_fault(state, recommendation)
+
+        validator = _validator()
+
+        # Iteration 1: validator captures snapshot; must not short-circuit.
+        validator.act(state)
+        assert state.loop_status == LoopStatus.RUNNING, (
+            "iter 1 must not short-circuit (loop_counter < 2 and no prior "
+            "snapshot)"
+        )
+
+        # Iteration 2: same physical state, recommendation outstanding.
+        state.loop_counter = 2
+        validator.act(state)
+        return state
+
+    def test_short_circuit_fires_on_stuck_fault_head_open(self):
+        state = self._run_two_iterations(
+            flag_name="head_open",
+            printer_status="paused",
+            recommendation="Close printhead and latch firmly.",
+        )
+
+        assert state.loop_status == LoopStatus.ESCALATED
+        assert state.escalation_reason == "awaiting_human_action"
+        assert state.loop_counter <= 3
+        sc = [
+            ev for ev in state.evidence
+            if ev.source == "validation_short_circuit"
+        ]
+        assert sc, "expected validation_short_circuit audit item"
+        assert "head_open" in sc[-1].content
+
+    def test_short_circuit_fires_on_stuck_fault_media_out(self):
+        state = self._run_two_iterations(
+            flag_name="media_out",
+            printer_status="paused",
+            recommendation="Load media roll and recalibrate (FEED button).",
+        )
+
+        assert state.loop_status == LoopStatus.ESCALATED
+        assert state.escalation_reason == "awaiting_human_action"
+        assert state.loop_counter <= 3
+        sc = [
+            ev for ev in state.evidence
+            if ev.source == "validation_short_circuit"
+        ]
+        assert sc, "expected validation_short_circuit audit item"
+        assert "media_out" in sc[-1].content
+
+    def test_short_circuit_fires_on_stuck_fault_ribbon_out(self):
+        state = self._run_two_iterations(
+            flag_name="ribbon_out",
+            printer_status="paused",
+            recommendation="Install ribbon and re-thread through path.",
+        )
+
+        assert state.loop_status == LoopStatus.ESCALATED
+        assert state.escalation_reason == "awaiting_human_action"
+        assert state.loop_counter <= 3
+        sc = [
+            ev for ev in state.evidence
+            if ev.source == "validation_short_circuit"
+        ]
+        assert sc, "expected validation_short_circuit audit item"
+        assert "ribbon_out" in sc[-1].content
+
+    def test_short_circuit_does_not_fire_when_state_changed(self):
+        """The human acted between iterations: the fault flag flipped
+        False and printer_status returned to idle. The validator must not
+        pre-empt the loop's natural success path.
+        """
+        state = _make_state(
+            head_open=True,
+            printer_status="paused",
+            loop_counter=1,
+        )
+        _seed_iter1_for_fault(
+            state,
+            "Close printhead and latch firmly.",
+        )
+
+        validator = _validator()
+        validator.act(state)
+        assert state.loop_status == LoopStatus.RUNNING
+
+        # Human closes the printhead between iterations.
+        state.device.head_open = False
+        state.device.printer_status = "idle"
+        state.loop_counter = 2
+
+        validator.act(state)
+
+        assert state.loop_status == LoopStatus.RUNNING, (
+            "must not short-circuit when the physical condition has "
+            "cleared between iterations"
+        )
+        sc = [
+            ev for ev in state.evidence
+            if ev.source == "validation_short_circuit"
+        ]
+        assert not sc, (
+            "no short-circuit audit item should exist when state changed"
+        )
+
+    def test_short_circuit_does_not_fire_on_first_iteration_with_fault(self):
+        """``loop_counter < 2`` guard: a single validator call on iter 1
+        with a fault and a recommendation must not short-circuit even
+        though the fault and recommendation are both present, because we
+        haven't given the human a chance to act yet.
+        """
+        state = _make_state(
+            head_open=True,
+            printer_status="paused",
+            loop_counter=1,
+        )
+        _seed_iter1_for_fault(
+            state,
+            "Close printhead and latch firmly.",
+        )
+
+        _validator().act(state)
+
+        assert state.loop_status == LoopStatus.RUNNING
+        sc = [
+            ev for ev in state.evidence
+            if ev.source == "validation_short_circuit"
+        ]
+        assert not sc

@@ -83,6 +83,19 @@ class ValidationSpecialist(Specialist):
 
     name = "validation_specialist"
 
+    def __init__(self) -> None:
+        super().__init__()
+        # Cached at the END of each act() call so the next call can detect
+        # "no progress" between iterations. Used only by the Session C.5
+        # fault short-circuit path.
+        self._last_device_snapshot: tuple | None = None
+        self._snapshot_session_id: str = ""
+        # Number of physical_recommendations evidence items observed at the
+        # end of the prior validator call. The fault short-circuit only
+        # fires when this is >= 1, which guarantees at least one
+        # recommendation existed in a strictly prior loop iteration.
+        self._physical_rec_count_at_last_check: int = 0
+
     def can_handle(self, state: AgentState) -> float:  # noqa: D401
         score = 0.0
 
@@ -201,9 +214,9 @@ class ValidationSpecialist(Specialist):
                 specialist=self.name,
                 source="validation_short_circuit",
                 content=(
-                    f"Awaiting human action on prior recommendation "
-                    f"(entry_id={triggering_entry.entry_id}, "
-                    f"specialist={triggering_entry.specialist}, "
+                    f"short-circuit on stuck human-action recommendation; "
+                    f"triggered by action_log entry {triggering_entry.entry_id} "
+                    f"(specialist={triggering_entry.specialist}, "
                     f"action={triggering_entry.action!r}). Underlying "
                     f"condition still present after {state.loop_counter} "
                     f"loop step(s); escalating instead of cycling further."
@@ -213,6 +226,51 @@ class ValidationSpecialist(Specialist):
             actions_taken.append(
                 f"short-circuit: awaiting human action on {triggering_entry.entry_id}"
             )
+
+        # ------------------------------------------------------------------
+        # 5b. Loop-termination check — Session C.5 fault short-circuit
+        # ------------------------------------------------------------------
+        # The B.5 path above only fires when a worker emitted an action_log
+        # result string containing "awaiting human action" — currently only
+        # the DeviceSpecialist user-paused branch does that. Fault branches
+        # (head_open / media_out / ribbon_out) emit human-readable advice
+        # as `physical_recommendations` evidence and never set that result
+        # string, so the loop runs out the cap on faults.
+        #
+        # This second path generalises the short-circuit: if the device
+        # state is unchanged from the prior validator call AND a physical
+        # condition is still active AND a `physical_recommendations`
+        # evidence item already existed at the end of the prior call,
+        # escalate with the same `awaiting_human_action` reason.
+        if state.loop_status == LoopStatus.RUNNING:
+            stuck_flag = self._find_stuck_physical_condition(state)
+            if stuck_flag is not None:
+                state.loop_status = LoopStatus.ESCALATED
+                state.escalation_reason = "awaiting_human_action"
+                ev = state.add_evidence(
+                    specialist=self.name,
+                    source="validation_short_circuit",
+                    content=(
+                        f"short-circuit on stuck physical condition; "
+                        f"{stuck_flag}=True after {state.loop_counter} "
+                        f"loop step(s) with no progress observed since "
+                        f"prior validator call. A physical_recommendations "
+                        f"evidence item is already on record; escalating "
+                        f"instead of cycling further."
+                    ),
+                )
+                evidence_items.append(ev.evidence_id)
+                actions_taken.append(
+                    f"short-circuit: stuck on physical condition {stuck_flag}"
+                )
+
+        # ------------------------------------------------------------------
+        # 6. Update cached snapshot for the next validator call. Always
+        # runs (including after a short-circuit), so an external test
+        # harness re-running the validator in the same session sees a
+        # consistent baseline.
+        # ------------------------------------------------------------------
+        self._update_device_snapshot(state)
 
         state.log_action(
             specialist=self.name,
@@ -522,3 +580,75 @@ class ValidationSpecialist(Specialist):
 
         # Most recent triggering entry — that's the one we cite.
         return candidates[-1]
+
+    # ------------------------------------------------------------------
+    # Session C.5 — fault short-circuit helpers
+    # ------------------------------------------------------------------
+
+    def _find_stuck_physical_condition(self, state: AgentState) -> str | None:
+        """Return the name of an active physical condition the loop is stuck
+        on, or None.
+
+        Stuck means: loop has run at least 2 iterations, the device's
+        printer_status + four physical flags are unchanged from the prior
+        validator call, at least one flag is True, and a
+        ``physical_recommendations`` evidence item already existed at the
+        end of the prior call. Together these mean the loop has emitted
+        actionable advice, the human hasn't acted, and nothing on the
+        device side has changed in this iteration — cycling further is
+        wasted work.
+        """
+        if state.loop_counter < 2:
+            return None
+
+        # Validator was constructed in a different session or never run
+        # before — no baseline to compare against.
+        if (
+            self._last_device_snapshot is None
+            or self._snapshot_session_id != state.session_id
+        ):
+            return None
+
+        if self._device_snapshot(state) != self._last_device_snapshot:
+            return None
+
+        # First active flag wins for the audit-trail evidence content.
+        if state.device.paused is True:
+            active_flag: str | None = "paused"
+        elif state.device.head_open is True:
+            active_flag = "head_open"
+        elif state.device.media_out is True:
+            active_flag = "media_out"
+        elif state.device.ribbon_out is True:
+            active_flag = "ribbon_out"
+        else:
+            active_flag = None
+        if active_flag is None:
+            return None
+
+        # The recommendation must have existed BEFORE this iteration —
+        # checking the cached count from the prior call enforces that.
+        if self._physical_rec_count_at_last_check < 1:
+            return None
+
+        return active_flag
+
+    def _device_snapshot(self, state: AgentState) -> tuple:
+        """Tuple of the five device fields used for no-progress detection."""
+        return (
+            state.device.printer_status,
+            state.device.paused,
+            state.device.head_open,
+            state.device.media_out,
+            state.device.ribbon_out,
+        )
+
+    def _update_device_snapshot(self, state: AgentState) -> None:
+        """Cache device snapshot + physical_recommendations count for the
+        next validator call. Runs at the end of every act()."""
+        self._snapshot_session_id = state.session_id
+        self._last_device_snapshot = self._device_snapshot(state)
+        self._physical_rec_count_at_last_check = sum(
+            1 for ev in state.evidence
+            if ev.source == "physical_recommendations"
+        )
