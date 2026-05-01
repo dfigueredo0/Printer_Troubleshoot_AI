@@ -1,0 +1,52 @@
+2026-04-30 02:22:32,244 [INFO] session_b6 :: ========================================================================
+2026-04-30 02:22:32,244 [INFO] session_b6 :: Session B.6 live loop starting — printer=192.168.99.10 model=claude-sonnet-4-6 budget=$0.1000 dry_run=False
+2026-04-30 02:22:32,244 [INFO] session_b6 :: Log file: C:\Users\dfigu\repo\Personal_Projects\Printer_Troubleshoot_AI\zt411-troubleshooter-agent\tests\logs\session_b6_20260430-072232.log
+2026-04-30 02:22:32,900 [INFO] session_b6 :: Idle baseline confirmed.
+2026-04-30 02:22:42,840 [INFO] session_b6 :: Pause confirmed via SNMP.
+2026-04-30 02:22:42,861 [INFO] zt411_agent.planner :: Runtime tier forced to tier2 by config.
+2026-04-30 02:22:42,861 [INFO] zt411_agent.planner :: Planner configured: backend=claude tier=tier2 model=claude-sonnet-4-6 require_citations=True
+2026-04-30 02:22:42,861 [INFO] zt411_agent.planner :: Runtime tier forced to tier2 by config.
+2026-04-30 02:22:42,861 [INFO] zt411_agent.planner :: Planner configured: backend=claude tier=tier2 model=claude-sonnet-4-6 require_citations=True
+2026-04-30 02:22:42,861 [INFO] zt411_agent.agent.orchestrator :: Agent loop starting | session=ba3abe8d-e6d3-4545-a93b-b73584b7cb5f os=OSPlatform.WINDOWS symptoms=['printer paused']
+2026-04-30 02:22:42,863 [INFO] zt411_agent.agent.orchestrator :: --- Loop step 1 ---
+2026-04-30 02:22:52,666 [INFO] faiss.loader :: Loading faiss with AVX512 support.
+2026-04-30 02:22:52,666 [INFO] faiss.loader :: Could not load library with AVX512 support due to:
+ModuleNotFoundError("No module named 'faiss.swigfaiss_avx512'")
+2026-04-30 02:22:52,666 [INFO] faiss.loader :: Loading faiss with AVX2 support.
+2026-04-30 02:22:52,711 [INFO] faiss.loader :: Successfully loaded faiss with AVX2 support.
+2026-04-30 02:22:52,718 [INFO] zt411_agent.rag.retriever :: Loading embedding model: sentence-transformers/all-MiniLM-L6-v2
+2026-04-30 02:22:52,718 [INFO] sentence_transformers.SentenceTransformer :: Use pytorch device_name: cpu
+2026-04-30 02:22:52,718 [INFO] sentence_transformers.SentenceTransformer :: Load pretrained SentenceTransformer: sentence-transformers/all-MiniLM-L6-v2
+2026-04-30 02:22:53,915 [INFO] zt411_agent.rag.retriever :: Loading FAISS index from data\rag_corpus\index.faiss
+2026-04-30 02:22:57,850 [INFO] httpx :: HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 200 OK"
+2026-04-30 02:22:57,852 [INFO] zt411_agent.planner :: Claude planner OK (attempt 1).
+2026-04-30 02:22:57,852 [INFO] zt411_agent.cost_tracking :: [budget] model=claude-sonnet-4-6 calls=1 in_tokens=1122 out_tokens=145 cost=$0.0055 / limit=$0.1000 remaining=$0.0945
+2026-04-30 02:22:57,854 [INFO] zt411_agent.agent.orchestrator :: Selected specialist: device_specialist (tier=tier2)
+2026-04-30 02:22:57,854 [INFO] zt411_agent.agent.device_specialist :: DeviceSpecialist acting on session ba3abe8d-e6d3-4545-a93b-b73584b7cb5f
+2026-04-30 02:23:00,521 [INFO] httpx :: HTTP Request: POST http://192.168.99.10:631/ipp/print "HTTP/1.1 200 OK"
+2026-04-30 02:23:00,521 [INFO] zt411_agent.agent.validation_specialist :: ValidationSpecialist acting on session ba3abe8d-e6d3-4545-a93b-b73584b7cb5f
+2026-04-30 02:23:00,521 [INFO] zt411_agent.agent.orchestrator :: --- Loop step 2 ---
+2026-04-30 02:23:04,390 [INFO] httpx :: HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 200 OK"
+2026-04-30 02:23:04,390 [INFO] zt411_agent.planner :: Claude planner OK (attempt 1).
+2026-04-30 02:23:04,396 [INFO] zt411_agent.cost_tracking :: [budget] model=claude-sonnet-4-6 calls=2 in_tokens=2550 out_tokens=284 cost=$0.0119 / limit=$0.1000 remaining=$0.0881
+2026-04-30 02:23:04,396 [INFO] zt411_agent.agent.orchestrator :: Selected specialist: device_specialist (tier=tier2)
+2026-04-30 02:23:04,396 [INFO] zt411_agent.agent.device_specialist :: DeviceSpecialist acting on session ba3abe8d-e6d3-4545-a93b-b73584b7cb5f
+2026-04-30 02:23:05,652 [INFO] httpx :: HTTP Request: POST http://192.168.99.10:631/ipp/print "HTTP/1.1 200 OK"
+2026-04-30 02:23:05,652 [INFO] zt411_agent.agent.validation_specialist :: ValidationSpecialist acting on session ba3abe8d-e6d3-4545-a93b-b73584b7cb5f
+2026-04-30 02:23:05,652 [INFO] zt411_agent.agent.orchestrator :: Agent loop finished | status=LoopStatus.ESCALATED steps=2
+2026-04-30 02:23:05,652 [INFO] zt411_agent.cost_tracking :: [budget] model=claude-sonnet-4-6 calls=2 in_tokens=2550 out_tokens=284 cost=$0.0119 / limit=$0.1000 remaining=$0.0881
+2026-04-30 02:23:05,652 [INFO] session_b6 :: Loop wall time: 22.80s
+2026-04-30 02:23:05,652 [INFO] session_b6 :: ========================================================================
+2026-04-30 02:23:05,652 [INFO] session_b6 :: Acceptance review:
+2026-04-30 02:23:05,652 [INFO] session_b6 ::   planner_citations_evidence_present       True
+2026-04-30 02:23:05,658 [INFO] session_b6 ::   citation_count                           2
+2026-04-30 02:23:05,658 [INFO] session_b6 ::   cited_snippet_ids                        ['ZT411_OG_pause_p45', 'zebra_manual_0071', 'ZT411_OG_pause_p45']
+2026-04-30 02:23:05,658 [INFO] session_b6 ::   cloud_tier_engaged                       True
+2026-04-30 02:23:05,658 [INFO] session_b6 ::   loop_status                              escalated
+2026-04-30 02:23:05,658 [INFO] session_b6 ::   escalation_reason                        awaiting_human_action
+2026-04-30 02:23:05,658 [INFO] session_b6 ::   loop_counter                             2
+2026-04-30 02:23:05,658 [INFO] session_b6 ::   evidence_count                           18
+2026-04-30 02:23:05,660 [INFO] session_b6 ::   action_log_count                         6
+2026-04-30 02:23:05,660 [INFO] session_b6 :: budget.cost_usd: $0.011910 / $0.1000
+2026-04-30 02:23:18,997 [INFO] session_b6 :: Resume confirmed via SNMP.
+2026-04-30 02:23:18,997 [INFO] session_b6 :: Idle restored.

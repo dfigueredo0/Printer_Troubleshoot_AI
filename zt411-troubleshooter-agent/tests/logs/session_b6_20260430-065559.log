@@ -1,0 +1,4 @@
+2026-04-30 01:55:59,963 [INFO] session_b6 :: ========================================================================
+2026-04-30 01:55:59,963 [INFO] session_b6 :: Session B.6 live loop starting — printer=192.168.99.10 model=claude-sonnet-4-6 budget=$0.5000 dry_run=True
+2026-04-30 01:55:59,963 [INFO] session_b6 :: Log file: C:\Users\dfigu\repo\Personal_Projects\Printer_Troubleshoot_AI\zt411-troubleshooter-agent\tests\logs\session_b6_20260430-065559.log
+2026-04-30 01:55:59,963 [INFO] session_b6 :: Installing dry-run tool replay patches (paused fixture).

@@ -1,18 +1,35 @@
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any
 
+from . import tools as _tools_mod
 from .base import Specialist
 from .tools import (
     snmp_zt411_status,
-    snmp_zt411_physical_flags,
+    snmp_zt411_physical_flags,  # kept for cross-vendor fallback
     snmp_zt411_consumables,
     snmp_zt411_alerts,
+    zpl_zt411_host_status,
     ipp_get_attributes,
     map_error_code_to_kb,
 )
 from ..state import AgentState, ActionStatus, RiskLevel
+
+# Wait between firing an action over TCP 9100 and re-reading state, so
+# the printer has time to update its ~HS response. Empirically 1-3s on
+# this firmware; 1.5s is the conservative middle. Module-level so tests
+# can patch it down to 0.0 to avoid wall-clock drag.
+_ACTION_SETTLE_DELAY_S = 1.5
+
+# Action names that the device specialist knows how to execute (i.e.
+# resolves via getattr on the tools module). Anything not in this set
+# is logged as FAILED with an "unknown action" reason.
+_EXECUTABLE_ACTIONS = frozenset({
+    "zpl_zt411_calibrate",
+    "zpl_zt411_print_config",
+})
 
 logger = logging.getLogger(__name__)
 
@@ -145,9 +162,15 @@ class DeviceSpecialist(Specialist):
             actions_taken.append("snmp identity poll")
 
         # ------------------------------------------------------------------
-        # 2. SNMP physical flags (always re-read — captures state changes)
+        # 2. Physical flags (always re-read — captures state changes)
+        #
+        # Phase 2.5: switched from snmp_zt411_physical_flags to
+        # zpl_zt411_host_status. The lab printer's SNMP agent is
+        # unreachable on UDP/161 (verified 2026-04-30 from both Windows
+        # pysnmp and WSL Net-SNMP); ZPL ~HS over TCP 9100 is the working
+        # read channel. Output dict shape is identical.
         # ------------------------------------------------------------------
-        r = snmp_zt411_physical_flags(ip)
+        r = zpl_zt411_host_status(ip)
         if r.success and r.output:
             flags = r.output
             state.device.head_open  = flags.get("head_open")
@@ -172,6 +195,9 @@ class DeviceSpecialist(Specialist):
                 )
         else:
             content = f"Physical flags read failed: {r.error}"
+        # Source label kept as snmp_physical_flags for log/test/metric
+        # continuity even though the transport underneath is now ZPL ~HS.
+        # The label is a stable identifier for "physical flags read".
         ev = state.add_evidence(specialist=self.name, source="snmp_physical_flags", content=content)
         evidence_items.append(ev.evidence_id)
         actions_taken.append("snmp physical flags")
@@ -343,6 +369,179 @@ class DeviceSpecialist(Specialist):
                 content="; ".join(recommendations),
             )
             evidence_items.append(ev.evidence_id)
+
+        # ------------------------------------------------------------------
+        # 9. Action proposals (Phase 4.1) — calibrate
+        # ------------------------------------------------------------------
+        # Symptom hints at "blank labels" pattern AND printer reports healthy
+        # idle state (no faults, not paused) AND we haven't already proposed
+        # or run calibration this session: propose ~JC. ValidationSpecialist's
+        # guardrail issues a confirmation token automatically for
+        # SERVICE_RESTART risk; Step 4's execution loop runs it after confirm.
+        symptom_text = " ".join(s for s in (state.symptoms or []) if s).lower()
+        blank_labels_hint = any(
+            h in symptom_text for h in ("blank", "unprinted", "missing print")
+        )
+        healthy_idle = not (
+            state.device.head_open
+            or state.device.media_out
+            or state.device.ribbon_out
+            or state.device.paused
+        )
+        existing_calibrate = any(
+            a.action == "zpl_zt411_calibrate"
+            and a.status in {
+                ActionStatus.PENDING,
+                ActionStatus.CONFIRMED,
+                ActionStatus.EXECUTED,
+            }
+            for a in state.action_log
+        )
+        if blank_labels_hint and healthy_idle and not existing_calibrate:
+            state.log_action(
+                specialist=self.name,
+                action="zpl_zt411_calibrate",
+                risk=RiskLevel.SERVICE_RESTART,
+                status=ActionStatus.PENDING,
+                result="Awaiting user confirmation. ~JC consumes 1-3 labels.",
+            )
+            actions_taken.append("propose calibrate")
+
+        # ------------------------------------------------------------------
+        # 10. Action execution (Phase 4.1)
+        # ------------------------------------------------------------------
+        # Find every action_log entry whose status is CONFIRMED and whose
+        # action name we know how to execute. For each:
+        #  - re-check preconditions (no active fault) via fresh ~HS read
+        #  - dispatch via getattr on the tools module (matches existing
+        #    direct-call pattern in cups_/windows_specialist)
+        #  - settle delay
+        #  - verify via second ~HS read
+        #  - append a new EXECUTED entry recording the result; the original
+        #    CONFIRMED entry is left in place for audit history
+        confirmed_executable = [
+            a for a in state.action_log
+            if a.status == ActionStatus.CONFIRMED
+            and a.action in _EXECUTABLE_ACTIONS
+        ]
+        # Skip entries that already have a sibling EXECUTED entry (loop
+        # ran the same action in a previous iteration). Without this guard,
+        # confirming once would re-execute every iteration.
+        already_executed_actions = {
+            a.action for a in state.action_log
+            if a.status == ActionStatus.EXECUTED
+            and a.action in _EXECUTABLE_ACTIONS
+        }
+        confirmed_executable = [
+            a for a in confirmed_executable
+            if a.action not in already_executed_actions
+        ]
+
+        for entry in confirmed_executable:
+            # 10a. Pre-execution precondition check.
+            pre = zpl_zt411_host_status(ip)
+            if not pre.success or not pre.output:
+                state.log_action(
+                    specialist=self.name,
+                    action=entry.action,
+                    risk=entry.risk,
+                    status=ActionStatus.FAILED,
+                    result=f"precondition read failed: {pre.error}",
+                )
+                actions_taken.append(f"abort {entry.action}: pre-read failed")
+                continue
+            pre_flags = pre.output
+            active_fault = (
+                pre_flags.get("head_open")
+                or pre_flags.get("media_out")
+                or pre_flags.get("ribbon_out")
+            )
+            if active_fault:
+                fault_desc = ",".join(
+                    k for k in ("head_open", "media_out", "ribbon_out")
+                    if pre_flags.get(k)
+                )
+                state.log_action(
+                    specialist=self.name,
+                    action=entry.action,
+                    risk=entry.risk,
+                    status=ActionStatus.FAILED,
+                    result=f"precondition violated: {fault_desc} active at execution time",
+                )
+                state.add_evidence(
+                    specialist=self.name,
+                    source="action_aborted",
+                    content=(
+                        f"Aborted {entry.action} — {fault_desc} appeared between "
+                        f"confirmation and execution. Original entry "
+                        f"{entry.entry_id} stays CONFIRMED for audit."
+                    ),
+                )
+                actions_taken.append(f"abort {entry.action}: {fault_desc}")
+                continue
+
+            # 10b. Dispatch the tool function. Direct getattr on the tools
+            # module so monkeypatching `tools.zpl_zt411_*` from tests
+            # affects this call site without needing registry surgery.
+            tool_fn = getattr(_tools_mod, entry.action, None)
+            if not callable(tool_fn):
+                state.log_action(
+                    specialist=self.name,
+                    action=entry.action,
+                    risk=entry.risk,
+                    status=ActionStatus.FAILED,
+                    result=f"unknown action callable: {entry.action!r}",
+                )
+                actions_taken.append(f"abort {entry.action}: not callable")
+                continue
+            tool_result = tool_fn(ip)
+            if not tool_result.success:
+                state.log_action(
+                    specialist=self.name,
+                    action=entry.action,
+                    risk=entry.risk,
+                    status=ActionStatus.FAILED,
+                    result=f"tool call failed: {tool_result.error}",
+                )
+                actions_taken.append(f"failed {entry.action}: {tool_result.error[:40]}")
+                continue
+
+            # 10c. Settle, then verify post-action state.
+            time.sleep(_ACTION_SETTLE_DELAY_S)
+            post = zpl_zt411_host_status(ip)
+            verify_ok = (
+                post.success
+                and post.output
+                and not (
+                    post.output.get("head_open")
+                    or post.output.get("media_out")
+                    or post.output.get("ribbon_out")
+                )
+            )
+            verify_summary = (
+                "post-state healthy"
+                if verify_ok
+                else f"verify failed: success={post.success} flags={post.output}"
+            )
+            state.log_action(
+                specialist=self.name,
+                action=entry.action,
+                risk=entry.risk,
+                status=ActionStatus.EXECUTED,
+                result=(
+                    f"sent_bytes={tool_result.output.get('sent_bytes') if tool_result.output else '?'}; "
+                    f"{verify_summary}"
+                ),
+            )
+            actions_taken.append(f"executed {entry.action}")
+
+            if verify_ok and entry.action == "zpl_zt411_calibrate":
+                # Calibration completed without entering a fault — that's
+                # the success criterion the loop can check (whether the
+                # next print job comes out blank is outside this window).
+                # Mark device_ready so ValidationSpecialist's is_resolved
+                # predicate can fire on the next iteration.
+                state.device_ready = True
 
         state.log_action(
             specialist=self.name,

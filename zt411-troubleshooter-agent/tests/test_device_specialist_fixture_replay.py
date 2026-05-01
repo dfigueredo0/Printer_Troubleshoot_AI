@@ -59,6 +59,17 @@ def _patch_replay(monkeypatch, fixture_name: str) -> None:
         "zt411_agent.agent.device_specialist.ipp_get_attributes",
         replay["ipp_get_attributes"],
     )
+    # Phase 2.5: device_specialist reads physical flags via
+    # zpl_zt411_host_status (lab printer SNMP unreachable). Patch both
+    # namespaces — same reason as ipp_get_attributes above.
+    monkeypatch.setattr(
+        "zt411_agent.agent.tools.zpl_zt411_host_status",
+        replay["zpl_zt411_host_status"],
+    )
+    monkeypatch.setattr(
+        "zt411_agent.agent.device_specialist.zpl_zt411_host_status",
+        replay["zpl_zt411_host_status"],
+    )
 
 
 def _initial_state() -> AgentState:

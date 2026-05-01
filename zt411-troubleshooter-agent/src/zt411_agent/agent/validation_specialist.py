@@ -62,6 +62,13 @@ _TEST_PRINT_EVIDENCE_SOURCES: set[str] = {
 # zero error_codes would block ready forever.
 _TOLERATED_BOOT_ALERTS: set[str] = {"alert:1.15"}
 
+# Action names whose EXECUTED entries with verified post-state count as
+# backing evidence for device_ready (Phase 4.1 _post_execution_verified).
+_POST_EXECUTION_VERIFIABLE_ACTIONS: set[str] = {
+    "zpl_zt411_calibrate",
+    "zpl_zt411_print_config",
+}
+
 
 class ValidationSpecialist(Specialist):
     """
@@ -417,8 +424,15 @@ class ValidationSpecialist(Specialist):
             actions_taken.append("confirmed queue_drained")
 
         # device_ready: status == idle/ready AND alerts/error_codes only
-        # contain the tolerated boot informational entry.
-        if not state.device_ready and self._device_ready_supported(state):
+        # contain the tolerated boot informational entry. Phase 4.1 also
+        # accepts a verified post-execution state (calibrate / print_config
+        # ran and the post-action ~HS read showed no faults) as backing
+        # evidence — useful when IPP is intermittent and printer_status
+        # falls back to "unknown" but the action itself succeeded.
+        if not state.device_ready and (
+            self._device_ready_supported(state)
+            or self._post_execution_verified(state)
+        ):
             state.device_ready = True
             ev = state.add_evidence(
                 specialist=self.name,
@@ -492,6 +506,25 @@ class ValidationSpecialist(Specialist):
                 return True
         return False
 
+    def _post_execution_verified(self, state: AgentState) -> bool:
+        """An action-execution entry exists with verified post-state.
+
+        Phase 4.1: when DeviceSpecialist's execution loop runs an action
+        like ``zpl_zt411_calibrate``, it appends an EXECUTED entry whose
+        ``result`` includes ``"post-state healthy"`` if the post-action
+        ``~HS`` read showed no fault flags. Treat that as backing
+        evidence for ``device_ready`` so the loop can resolve even when
+        IPP-derived ``printer_status`` is "unknown".
+        """
+        for entry in reversed(state.action_log):
+            if entry.status != ActionStatus.EXECUTED:
+                continue
+            if entry.action not in _POST_EXECUTION_VERIFIABLE_ACTIONS:
+                continue
+            if "post-state healthy" in (entry.result or ""):
+                return True
+        return False
+
     def _hallucination_guard(
         self,
         state: AgentState,
@@ -511,7 +544,10 @@ class ValidationSpecialist(Specialist):
             state.queue_drained = False
             missing.append("queue_drained")
 
-        if state.device_ready and not self._device_ready_supported(state):
+        if state.device_ready and not (
+            self._device_ready_supported(state)
+            or self._post_execution_verified(state)
+        ):
             state.device_ready = False
             missing.append("device_ready")
 

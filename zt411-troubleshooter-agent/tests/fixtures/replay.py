@@ -139,8 +139,82 @@ def replay_ipp_get_attributes(fixture_path: str | Path) -> Callable[..., ToolRes
     return _ipp
 
 
+# ---------------------------------------------------------------------------
+# ZPL ~HS replay (Phase 2.5+ — replaces snmp_zt411_physical_flags as the
+# device-specialist read path on hardware where SNMP is unreachable). One
+# canned response per known fixture state, keyed off the fixture stem.
+# Field semantics per Zebra ZPL Programming Guide §~HS:
+#   line 1: comm_iface, paper_out_flag, pause_flag, label_length_dots, ...
+#   line 2: function_settings, _, head_up_flag, ribbon_out_flag, ...
+# ---------------------------------------------------------------------------
+
+_HS_BY_STATE: Dict[str, str] = {
+    # idle / no-fault baseline
+    "idle_baseline":  "030,0,0,0308,000,0,0,0,000,0,0,0\n"
+                      "001,0,0,0,1,2,6,0,00000000,1,000\n0000,0",
+    "post_test_idle": "030,0,0,0308,000,0,0,0,000,0,0,0\n"
+                      "001,0,0,0,1,2,6,0,00000000,1,000\n0000,0",
+    # user-pressed pause, no other faults
+    "paused":         "030,0,1,0308,000,0,0,0,000,0,0,0\n"
+                      "001,0,0,0,1,2,6,0,00000000,1,000\n0000,0",
+    # auto-pause from a physical fault (paused=True AND fault flag)
+    "head_open":      "030,0,1,0308,000,0,0,0,000,0,0,0\n"
+                      "001,0,1,0,1,2,6,0,00000000,1,000\n0000,0",
+    "media_out":      "030,1,1,0308,000,0,0,0,000,0,0,0\n"
+                      "001,0,0,0,1,2,6,0,00000000,1,000\n0000,0",
+    "ribbon_out":     "030,0,1,0308,000,0,0,0,000,0,0,0\n"
+                      "001,0,0,1,1,2,6,0,00000000,1,000\n0000,0",
+}
+
+
+def _state_stem(fixture_path: str | Path) -> str:
+    """Map fixture filename to its state key in _HS_BY_STATE.
+
+    Strips the standard `zt411_fixture_` prefix and `.json` suffix so
+    a fixture path like `zt411_fixture_head_open.json` resolves to
+    `head_open`.
+    """
+    name = Path(fixture_path).stem
+    if name.startswith("zt411_fixture_"):
+        name = name[len("zt411_fixture_"):]
+    return name
+
+
+def replay_zpl_zt411_host_status(
+    fixture_path: str | Path,
+) -> Callable[..., ToolResult]:
+    """Build a zpl_zt411_host_status replacement bound to one fixture's state.
+
+    Looks up a canned `~HS` response for the fixture's state stem,
+    parses it through the production parser, and returns the resulting
+    ToolResult so consumers see the exact same dict shape they would in
+    production. Unknown states return success=False with a clear error.
+    """
+    stem = _state_stem(fixture_path)
+    response = _HS_BY_STATE.get(stem)
+
+    # Defer the parser import to call time — keeps the test module's
+    # import graph lean and avoids a circular if production code ever
+    # starts importing test fixtures by accident.
+    from zt411_agent.agent.tools import _parse_host_status
+
+    def _host_status(ip: str, port: int = 9100) -> ToolResult:
+        if response is None:
+            return ToolResult(
+                success=False,
+                error=f"no canned ~HS response for fixture state {stem!r}",
+            )
+        try:
+            flags = _parse_host_status(response)
+        except ValueError as exc:
+            return ToolResult(success=False, error=str(exc), raw=response)
+        return ToolResult(success=True, output=flags, raw=response)
+
+    return _host_status
+
+
 def make_fixture_replay(fixture_path: str | Path) -> Dict[str, Callable[..., ToolResult]]:
-    """Bundle all three replay callables for a single fixture.
+    """Bundle all replay callables for a single fixture.
 
     Returns a dict ready to drive monkeypatch:
 
@@ -151,11 +225,21 @@ def make_fixture_replay(fixture_path: str | Path) -> Dict[str, Callable[..., Too
                             replay["snmp_walk"])
         monkeypatch.setattr("zt411_agent.agent.tools.ipp_get_attributes",
                             replay["ipp_get_attributes"])
+        # Phase 2.5: device_specialist now reads physical flags via ZPL,
+        # so also patch zpl_zt411_host_status in both namespaces (the
+        # function is imported into device_specialist's namespace).
+        monkeypatch.setattr("zt411_agent.agent.tools.zpl_zt411_host_status",
+                            replay["zpl_zt411_host_status"])
+        monkeypatch.setattr(
+            "zt411_agent.agent.device_specialist.zpl_zt411_host_status",
+            replay["zpl_zt411_host_status"],
+        )
     """
     return {
         "snmp_get": replay_snmp_get(fixture_path),
         "snmp_walk": replay_snmp_walk(fixture_path),
         "ipp_get_attributes": replay_ipp_get_attributes(fixture_path),
+        "zpl_zt411_host_status": replay_zpl_zt411_host_status(fixture_path),
     }
 
 

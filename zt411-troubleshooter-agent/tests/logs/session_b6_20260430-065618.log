@@ -1,0 +1,57 @@
+2026-04-30 01:56:18,773 [INFO] session_b6 :: ========================================================================
+2026-04-30 01:56:18,773 [INFO] session_b6 :: Session B.6 live loop starting — printer=192.168.99.10 model=claude-sonnet-4-6 budget=$0.5000 dry_run=True
+2026-04-30 01:56:18,773 [INFO] session_b6 :: Log file: C:\Users\dfigu\repo\Personal_Projects\Printer_Troubleshoot_AI\zt411-troubleshooter-agent\tests\logs\session_b6_20260430-065618.log
+2026-04-30 01:56:18,774 [INFO] session_b6 :: Installing dry-run tool replay patches (paused fixture).
+2026-04-30 01:56:18,785 [INFO] session_b6 :: Dry-run: skipping idle/pause prompts.
+2026-04-30 01:56:18,791 [INFO] zt411_agent.planner :: Runtime tier forced to tier2 by config.
+2026-04-30 01:56:18,791 [INFO] zt411_agent.planner :: Planner configured: backend=claude tier=tier2 model=claude-sonnet-4-6 require_citations=True
+2026-04-30 01:56:18,791 [INFO] zt411_agent.planner :: Runtime tier forced to tier2 by config.
+2026-04-30 01:56:18,791 [INFO] zt411_agent.planner :: Planner configured: backend=claude tier=tier2 model=claude-sonnet-4-6 require_citations=True
+2026-04-30 01:56:18,791 [INFO] zt411_agent.agent.orchestrator :: Agent loop starting | session=303c4766-8581-4ad5-8af1-ef3931996460 os=OSPlatform.WINDOWS symptoms=['printer paused']
+2026-04-30 01:56:18,793 [INFO] zt411_agent.agent.orchestrator :: --- Loop step 1 ---
+2026-04-30 01:56:29,022 [INFO] faiss.loader :: Loading faiss with AVX512 support.
+2026-04-30 01:56:29,022 [INFO] faiss.loader :: Could not load library with AVX512 support due to:
+ModuleNotFoundError("No module named 'faiss.swigfaiss_avx512'")
+2026-04-30 01:56:29,022 [INFO] faiss.loader :: Loading faiss with AVX2 support.
+2026-04-30 01:56:29,076 [INFO] faiss.loader :: Successfully loaded faiss with AVX2 support.
+2026-04-30 01:56:29,086 [INFO] zt411_agent.rag.retriever :: Loading embedding model: sentence-transformers/all-MiniLM-L6-v2
+2026-04-30 01:56:29,088 [INFO] sentence_transformers.SentenceTransformer :: Use pytorch device_name: cpu
+2026-04-30 01:56:29,089 [INFO] sentence_transformers.SentenceTransformer :: Load pretrained SentenceTransformer: sentence-transformers/all-MiniLM-L6-v2
+2026-04-30 01:56:30,327 [INFO] zt411_agent.rag.retriever :: Loading FAISS index from data\rag_corpus\index.faiss
+2026-04-30 01:56:31,105 [INFO] httpx :: HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 400 Bad Request"
+2026-04-30 01:56:31,107 [WARNING] zt411_agent.planner :: Claude attempt 1/2 failed: Client error '400 Bad Request' for url 'https://api.anthropic.com/v1/messages'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/400
+2026-04-30 01:56:33,553 [INFO] httpx :: HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 400 Bad Request"
+2026-04-30 01:56:33,555 [WARNING] zt411_agent.planner :: Claude attempt 2/2 failed: Client error '400 Bad Request' for url 'https://api.anthropic.com/v1/messages'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/400
+2026-04-30 01:56:33,555 [WARNING] zt411_agent.planner :: Cloud planner failed, trying Ollama: Claude API failed after 2 attempts: Client error '400 Bad Request' for url 'https://api.anthropic.com/v1/messages'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/400
+2026-04-30 01:56:45,041 [INFO] httpx :: HTTP Request: POST http://localhost:11434/api/chat "HTTP/1.1 200 OK"
+2026-04-30 01:56:45,042 [WARNING] zt411_agent.planner :: Ollama attempt 1/2 failed: require_citations=true but citation_ids is empty — every recommendation must cite a knowledge-base snippet
+2026-04-30 01:56:51,713 [INFO] httpx :: HTTP Request: POST http://localhost:11434/api/chat "HTTP/1.1 200 OK"
+2026-04-30 01:56:51,714 [WARNING] zt411_agent.planner :: Ollama attempt 2/2 failed: require_citations=true but citation_ids is empty — every recommendation must cite a knowledge-base snippet
+2026-04-30 01:56:51,714 [WARNING] zt411_agent.planner :: Ollama planner failed, using offline fallback: Ollama failed after 2 attempts: require_citations=true but citation_ids is empty — every recommendation must cite a knowledge-base snippet
+2026-04-30 01:56:51,715 [INFO] zt411_agent.cost_tracking :: [budget] model=claude-sonnet-4-6 calls=0 in_tokens=0 out_tokens=0 cost=$0.0000 / limit=$0.5000 remaining=$0.5000
+2026-04-30 01:56:51,715 [INFO] zt411_agent.agent.orchestrator :: Selected specialist: device_specialist (tier=tier0)
+2026-04-30 01:56:51,715 [INFO] zt411_agent.agent.device_specialist :: DeviceSpecialist acting on session 303c4766-8581-4ad5-8af1-ef3931996460
+2026-04-30 01:56:51,717 [INFO] zt411_agent.agent.validation_specialist :: ValidationSpecialist acting on session 303c4766-8581-4ad5-8af1-ef3931996460
+2026-04-30 01:56:51,717 [INFO] zt411_agent.agent.orchestrator :: --- Loop step 2 ---
+2026-04-30 01:56:51,774 [INFO] zt411_agent.cost_tracking :: [budget] model=claude-sonnet-4-6 calls=0 in_tokens=0 out_tokens=0 cost=$0.0000 / limit=$0.5000 remaining=$0.5000
+2026-04-30 01:56:51,774 [INFO] zt411_agent.agent.orchestrator :: Selected specialist: windows_specialist (tier=tier0)
+2026-04-30 01:56:51,774 [INFO] zt411_agent.agent.windows_specialist :: WindowsSpecialist acting on session 303c4766-8581-4ad5-8af1-ef3931996460
+2026-04-30 01:57:00,018 [INFO] zt411_agent.agent.validation_specialist :: ValidationSpecialist acting on session 303c4766-8581-4ad5-8af1-ef3931996460
+2026-04-30 01:57:00,019 [INFO] zt411_agent.agent.orchestrator :: Agent loop finished | status=LoopStatus.ESCALATED steps=2
+2026-04-30 01:57:00,019 [INFO] zt411_agent.cost_tracking :: [budget] model=claude-sonnet-4-6 calls=0 in_tokens=0 out_tokens=0 cost=$0.0000 / limit=$0.5000 remaining=$0.5000
+2026-04-30 01:57:00,019 [INFO] session_b6 :: Loop wall time: 41.24s
+2026-04-30 01:57:00,019 [INFO] session_b6 :: ========================================================================
+2026-04-30 01:57:00,019 [INFO] session_b6 :: Acceptance review:
+2026-04-30 01:57:00,019 [INFO] session_b6 ::   planner_citations_evidence_present       False
+2026-04-30 01:57:00,019 [INFO] session_b6 ::   citation_count                           0
+2026-04-30 01:57:00,019 [INFO] session_b6 ::   cited_snippet_ids                        []
+2026-04-30 01:57:00,019 [INFO] session_b6 ::   cloud_tier_engaged                       False
+2026-04-30 01:57:00,019 [INFO] session_b6 ::   loop_status                              escalated
+2026-04-30 01:57:00,019 [INFO] session_b6 ::   escalation_reason                        awaiting_human_action
+2026-04-30 01:57:00,019 [INFO] session_b6 ::   loop_counter                             2
+2026-04-30 01:57:00,019 [INFO] session_b6 ::   evidence_count                           15
+2026-04-30 01:57:00,019 [INFO] session_b6 ::   action_log_count                         5
+2026-04-30 01:57:00,019 [INFO] session_b6 :: budget.cost_usd: $0.000000 / $0.5000

@@ -750,7 +750,13 @@ def snmp_zt411_physical_flags(
     ip: str,
     community: str = "public",
 ) -> ToolResult:
-    """Read ZT411 physical condition flags via Zebra state bitmask + alert table.
+    """[DEPRECATED on the lab printer] Read ZT411 physical flags via SNMP.
+
+    Prefer `zpl_zt411_host_status` for ZT411 firmware V92.21.39Z — that
+    printer's SNMP agent is unreachable on UDP/161 (verified from both
+    Windows and WSL on 2026-04-30; see `docs/phase4/snmp_set_findings.md`).
+    Kept in tools.py for cross-vendor / cross-firmware compatibility on
+    other printers where SNMP works.
 
     Reads the state bitmask at ZBR_STATE_BITMASK and the live alert table.
     Decodes:
@@ -959,6 +965,200 @@ def snmp_zt411_alerts(
         success=True,
         output={"alerts": alerts, "count": len(alerts), "raw_rows": rows},
     )
+
+# ===========================================================================
+# DEVICE TOOLS — ZPL OVER TCP 9100
+# ===========================================================================
+#
+# The lab printer (ZT411 firmware V92.21.39Z) is currently unreachable on
+# UDP/161 — verified from both Windows pysnmp and WSL Net-SNMP on
+# 2026-04-30. ICMP and TCP/9100 are healthy. See
+# `docs/phase4/snmp_set_findings.md` (pre-flight verification subsection).
+#
+# These tools provide an SNMP-independent read/write path for the agent
+# loop. `zpl_zt411_host_status` is the read-side replacement for
+# `snmp_zt411_physical_flags`; subsequent tools (`zpl_zt411_calibrate`,
+# `zpl_zt411_print_config`, `zpl_zt411_status`) provide write actions.
+
+def _zpl_send_over_9100(
+    ip: str,
+    payload: bytes,
+    expect_response: bool = False,
+    response_timeout_s: float = 3.0,
+    port: int = 9100,
+    connect_timeout_s: float = 5.0,
+) -> ToolResult:
+    """Open a TCP socket to the printer's raw-ZPL port, send bytes,
+    optionally read a response.
+
+    `~HS`-style queries return ASCII text; `~JC`/`~WC` actions are
+    fire-and-forget and should be called with `expect_response=False`.
+
+    Returns:
+      success+output={'response': str, 'sent_bytes': int} when
+        expect_response=True
+      success+output={'sent_bytes': int} when expect_response=False
+      success=False with error string on socket / timeout failure
+    """
+    sock: Optional[socket.socket] = None
+    try:
+        sock = socket.create_connection((ip, port), timeout=connect_timeout_s)
+        sock.sendall(payload)
+        if not expect_response:
+            return ToolResult(
+                success=True,
+                output={"sent_bytes": len(payload)},
+            )
+
+        sock.settimeout(response_timeout_s)
+        chunks: List[bytes] = []
+        try:
+            while True:
+                chunk = sock.recv(4096)
+                if not chunk:
+                    break
+                chunks.append(chunk)
+        except socket.timeout:
+            # Printer finished sending; recv timeout is the normal terminator.
+            pass
+
+        raw = b"".join(chunks)
+        response = raw.decode("ascii", errors="replace")
+        return ToolResult(
+            success=True,
+            output={"response": response, "sent_bytes": len(payload)},
+            raw=response,
+        )
+    except (socket.timeout, ConnectionRefusedError, OSError) as exc:
+        return ToolResult(success=False, error=f"zpl send failed: {exc}")
+    finally:
+        if sock is not None:
+            try:
+                sock.close()
+            except OSError:
+                pass
+
+
+def _parse_host_status(response: str) -> Dict[str, Any]:
+    """Decode a `~HS` response into the physical-flags dict shape.
+
+    Returns the same key set as `snmp_zt411_physical_flags` plus a few
+    ZPL-only extras (`buffer_full`, `label_length_dots`, `raw_response`).
+
+    Raises ValueError if the response shape doesn't match the documented
+    Zebra `~HS` format (3 lines, comma-separated fields).
+    """
+    # Strip STX (0x02), ETX (0x03), CR, and surrounding whitespace.
+    cleaned = response.replace("\x02", "").replace("\x03", "").replace("\r", "")
+    lines = [ln.strip() for ln in cleaned.split("\n") if ln.strip()]
+    if len(lines) < 2:
+        raise ValueError(
+            f"~HS returned {len(lines)} lines, expected 3 — got {response!r}"
+        )
+
+    line1 = lines[0].split(",")
+    line2 = lines[1].split(",")
+    if len(line1) < 6 or len(line2) < 4:
+        raise ValueError(
+            f"~HS field count short: line1={len(line1)} line2={len(line2)} "
+            f"raw={response!r}"
+        )
+
+    paused = line1[2] == "1"
+    head_open = line2[2] == "1"
+    media_out = line1[1] == "1"
+    ribbon_out = line2[3] == "1"
+    has_fault = head_open or media_out or ribbon_out
+    if not paused:
+        paused_is_user = None
+    else:
+        paused_is_user = not has_fault
+
+    return {
+        "paused": paused,
+        "head_open": head_open,
+        "media_out": media_out,
+        "ribbon_out": ribbon_out,
+        "buffer_full": line1[5] == "1",
+        "label_length_dots": int(line1[3]) if line1[3].isdigit() else None,
+        "paused_is_user_initiated": paused_is_user,
+        # Compatibility with snmp_zt411_physical_flags consumers
+        # (device_specialist.py:165 reads `raw_bitmask`):
+        "raw_bitmask": cleaned.replace("\n", " | "),
+        "raw_response": response,
+    }
+
+
+def zpl_zt411_host_status(ip: str, port: int = 9100) -> ToolResult:
+    """Read ZT411 physical state via ZPL `~HS` over TCP 9100.
+
+    Replacement for `snmp_zt411_physical_flags` on hosts/printers where
+    SNMP UDP/161 is unreachable. Returns the same dict shape so existing
+    call sites can swap function names with no other changes.
+
+    Verified against ZT411 firmware V92.21.39Z (Phase 4.0 reconnaissance,
+    2026-04-30).
+
+    Returns output={
+        'paused': bool,
+        'head_open': bool,
+        'media_out': bool,
+        'ribbon_out': bool,
+        'buffer_full': bool,
+        'label_length_dots': int | None,
+        'paused_is_user_initiated': bool | None,
+        'raw_bitmask': str,    # cleaned ~HS response, single-line for log compat
+        'raw_response': str,   # untouched ~HS response
+    }
+    """
+    r = _zpl_send_over_9100(ip, b"~HS", expect_response=True, port=port)
+    if not r.success:
+        return ToolResult(success=False, error=r.error)
+    response = (r.output or {}).get("response", "")
+    try:
+        flags = _parse_host_status(response)
+    except ValueError as exc:
+        return ToolResult(success=False, error=str(exc), raw=response)
+    return ToolResult(success=True, output=flags, raw=response)
+
+
+def zpl_zt411_status(ip: str, port: int = 9100) -> ToolResult:
+    """Planner-facing alias for `zpl_zt411_host_status`.
+
+    Exists so the LLM planner sees a 'status' tool in the same naming
+    family as 'calibrate' and 'print_config'. Same signature, same
+    behavior. Risk class at the action-log layer: SAFE.
+    """
+    return zpl_zt411_host_status(ip, port=port)
+
+
+def zpl_zt411_calibrate(ip: str, port: int = 9100) -> ToolResult:
+    """Force media-sensor calibration via ZPL `~JC`.
+
+    Consumes 1-3 label-lengths of media. The printer refuses to start
+    calibration while a physical fault is active (head open, media out,
+    ribbon out) — callers should verify no fault flags via
+    `zpl_zt411_host_status` before invoking. Fire-and-forget on the wire;
+    verification is via a follow-up `zpl_zt411_host_status` read.
+
+    Risk class at the action-log layer: SERVICE_RESTART (consumes media,
+    requires user confirmation per ValidationSpecialist guardrail).
+
+    Returns output={'sent_bytes': int} on success.
+    """
+    return _zpl_send_over_9100(ip, b"~JC", expect_response=False, port=port)
+
+
+def zpl_zt411_print_config(ip: str, port: int = 9100) -> ToolResult:
+    """Print the configuration label via ZPL `~WC`. Consumes one label.
+
+    Pure read-side action — does not change persistent printer state.
+    Risk class at the action-log layer: SERVICE_RESTART (consumes media).
+
+    Returns output={'sent_bytes': int} on success.
+    """
+    return _zpl_send_over_9100(ip, b"~WC", expect_response=False, port=port)
+
 
 def ipp_get_attributes(ip: str, port: int = 631) -> ToolResult:
     """Read IPP printer attributes via GET-PRINTER-ATTRIBUTES request.
@@ -1493,12 +1693,17 @@ def _build_default_registry() -> ToolRegistry:
         (ToolSchema("oui_vendor", "MAC OUI vendor lookup", "per_tool", 2.0), oui_vendor),
         (ToolSchema("snmp_get", "SNMP GET", "per_printer", 10.0), snmp_get),
         (ToolSchema("snmp_walk", "SNMP WALK", "per_printer", 15.0), snmp_walk),
-        # Device
+        # Device — SNMP (deprecated on lab printer, kept for cross-vendor)
         (ToolSchema("snmp_zt411_status", "ZT411 SNMP status", "per_printer", 15.0), snmp_zt411_status),
         (ToolSchema("snmp_zt411_physical_flags", "ZT411 physical flags", "per_printer", 10.0), snmp_zt411_physical_flags),
         (ToolSchema("snmp_zt411_consumables", "ZT411 consumables", "per_printer", 15.0), snmp_zt411_consumables),
         (ToolSchema("snmp_zt411_alerts", "ZT411 alerts", "per_printer", 10.0), snmp_zt411_alerts),
         (ToolSchema("ipp_get_attributes", "IPP printer attributes", "per_printer", 10.0), ipp_get_attributes),
+        # Device — ZPL over TCP 9100 (read + actions, Phase 4.1)
+        (ToolSchema("zpl_zt411_host_status", "ZT411 ZPL ~HS state read", "per_printer", 10.0), zpl_zt411_host_status),
+        (ToolSchema("zpl_zt411_status", "ZT411 ZPL status read (alias)", "per_tool", 5.0), zpl_zt411_status),
+        (ToolSchema("zpl_zt411_calibrate", "ZT411 ZPL ~JC media calibration", "per_printer", 10.0), zpl_zt411_calibrate),
+        (ToolSchema("zpl_zt411_print_config", "ZT411 ZPL ~WC print config label", "per_printer", 10.0), zpl_zt411_print_config),
         # Windows
         (ToolSchema("ps_query_spooler", "Query Spooler service", "per_tool", 10.0), ps_query_spooler),
         (ToolSchema("ps_enum_printers", "Enumerate Windows printers", "per_tool", 15.0), ps_enum_printers),
