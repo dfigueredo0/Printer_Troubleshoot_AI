@@ -214,7 +214,17 @@ class Orchestrator:
  
             # 5. VALIDATE
             state = self._run_specialist(self.validator, state)
- 
+
+            # 5a. SUSPEND if the validator just issued a confirmation token.
+            # The loop yields here; the FastAPI service holds the SSE stream
+            # open and re-enters run() after the user approves the action.
+            if self._has_pending_confirmation(state):
+                state.loop_status = LoopStatus.AWAITING_CONFIRMATION
+                logger.info(
+                    "Loop suspended: PENDING action(s) awaiting confirmation."
+                )
+                break
+
             if state.is_resolved():
                 state.loop_status = LoopStatus.SUCCESS
                 logger.info("Validated success; exiting loop.")
@@ -328,4 +338,20 @@ class Orchestrator:
             risk=RiskLevel.SAFE,
             status=ActionStatus.EXECUTED,
             result="Human intervention required.",
+        )
+
+    def _has_pending_confirmation(self, state: AgentState) -> bool:
+        """True if any action_log entry is PENDING with a confirmation token.
+
+        When this returns True, the orchestrator suspends the loop instead of
+        iterating further. The FastAPI service layer (or any other caller)
+        observes loop_status == AWAITING_CONFIRMATION, holds the SSE stream
+        open, and resumes the loop after the user POSTs to /confirm/{token}
+        — which calls consume_confirmation_token + update_action_status to
+        flip the entry to CONFIRMED, at which point this predicate returns
+        False on the next pass and execution proceeds.
+        """
+        return any(
+            a.status == ActionStatus.PENDING and a.confirmation_token
+            for a in state.action_log
         )

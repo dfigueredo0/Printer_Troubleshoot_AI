@@ -234,9 +234,11 @@ def test_snippet_unknown_id_returns_404(stub_snippet_cache):
 
 def test_diagnose_start_returns_html_fragment_with_sse_connect():
     client = TestClient(app)
+    # /diagnose-start accepts form-encoded data so HTMX `hx-post`
+    # form submissions land cleanly without a serialiser plugin.
     r = client.post(
         "/diagnose-start",
-        json={"symptom": "blank labels", "printer_ip": PRINTER_IP},
+        data={"symptom": "blank labels", "printer_ip": PRINTER_IP},
     )
     assert r.status_code == 200
     assert "text/html" in r.headers["content-type"]
@@ -260,7 +262,9 @@ def test_diagnose_streams_events(offline_service):
 
     Phase 4.3: each logical event type is emitted twice in a row — once
     as ``{type}-json`` for programmatic clients and once as ``{type}-html``
-    for HTMX. Asserts presence of both flavors for every event type.
+    for HTMX. Phase 4.4: the calibrate path now suspends with `awaiting`
+    instead of running to completion, so the terminator is `awaiting-html`
+    (or `complete-html` if a future test scenario reaches that path).
     """
     client = TestClient(app)
     with client.stream(
@@ -280,16 +284,23 @@ def test_diagnose_streams_events(offline_service):
         for line in resp.iter_lines():
             if line.startswith("event:"):
                 event_lines.append(line)
-            # Bail once we see complete-html — keeps the test from waiting for
-            # the connection to fully drain.
-            if line.startswith("event: complete-html"):
+            # Bail on either terminator — `awaiting` for the suspend path
+            # (calibrate proposal awaiting confirm) and `complete` for any
+            # path that runs to a terminal status.
+            if line.startswith("event: awaiting-html") or line.startswith(
+                "event: complete-html"
+            ):
                 break
 
     types = {line.split(":", 1)[1].strip() for line in event_lines}
-    for event in ("session", "evidence", "action", "complete"):
+    for event in ("session", "evidence", "action"):
         assert f"{event}-json" in types, (
             f"missing '{event}-json' event; got {types}"
         )
         assert f"{event}-html" in types, (
             f"missing '{event}-html' event; got {types}"
         )
+    # Loop ends with either awaiting (4.4 suspend) or complete (terminal).
+    assert (
+        "awaiting-html" in types or "complete-html" in types
+    ), f"expected terminator event (awaiting/complete); got {types}"

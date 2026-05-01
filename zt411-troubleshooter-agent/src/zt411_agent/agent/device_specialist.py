@@ -72,6 +72,19 @@ class DeviceSpecialist(Specialist):
     name = "device_specialist"
 
     def can_handle(self, state: AgentState) -> float:  # noqa: D401
+        # Phase 4.4: if the action_log holds a CONFIRMED entry whose
+        # action is one we can execute, the orchestrator MUST pick us
+        # next so .act() can run its execution branch — no other
+        # specialist can advance that work. Short-circuit at the top of
+        # can_handle with a high score so the diminishing-returns clauses
+        # below don't drop us under MIN_UTILITY after a resume.
+        for a in state.action_log:
+            if (
+                a.status == ActionStatus.CONFIRMED
+                and a.action in _EXECUTABLE_ACTIONS
+            ):
+                return 0.95
+
         score = 0.0
 
         # 1. Device status not yet known — must probe

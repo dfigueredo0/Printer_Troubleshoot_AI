@@ -63,6 +63,10 @@ class LoopStatus(str, Enum):
     ESCALATED = "escalated"
     MAX_STEPS = "max_steps"
     TIMEOUT = "timeout"
+    # Non-terminal: orchestrator yielded control because a PENDING action
+    # is awaiting an external confirm (POST /confirm/{token}). The caller
+    # holds the SSE stream open and re-enters run() once the user approves.
+    AWAITING_CONFIRMATION = "awaiting_confirmation"
 
 
 class LoopIntent(str, Enum):

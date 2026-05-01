@@ -35,7 +35,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Optional
 
-from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi import FastAPI, HTTPException, Query, Request, Form
 from fastapi.responses import (
     FileResponse,
     HTMLResponse,
@@ -48,7 +48,13 @@ from fastapi.staticfiles import StaticFiles
 from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_LATEST
 from pydantic import BaseModel
 
-from src.zt411_agent.state import AgentState, ActionStatus, LoopIntent, OSPlatform
+from src.zt411_agent.state import (
+    AgentState,
+    ActionStatus,
+    LoopIntent,
+    LoopStatus,
+    OSPlatform,
+)
 from src.zt411_agent.logging_utils import configure_logging
 from src.zt411_agent.db import get_session_store
 
@@ -635,11 +641,25 @@ class SseSession:
     Holds the AgentState, an asyncio queue of pre-formatted SSE event
     strings, the loop's background task handle, and a `completed` flag
     the SSE generator polls so it can drain the queue and shut down.
+
+    Phase 4.4 (loop pause/resume): the emission counters are per-session,
+    not per-bridge-call, because the bridge re-enters on resume and must
+    not re-emit history. `max_steps` and `force_tier` are stashed too so
+    the resume path can re-launch the bridge with the same config.
     """
     state: AgentState
     event_queue: "asyncio.Queue[str]" = field(default_factory=asyncio.Queue)
     task: Optional[asyncio.Task] = None
     completed: bool = False
+    last_evidence_emitted: int = 0
+    last_action_status: dict[str, str] = field(default_factory=dict)
+    max_steps: int = 10
+    force_tier: str = "auto"
+    # When True (HTMX flow via /diagnose-stream/{id}) the SSE generator
+    # keeps the connection open across AWAITING_CONFIRMATION so resume
+    # via /confirm/{token} can push more events. When False (legacy POST
+    # /diagnose) the generator drains and closes once the bridge returns.
+    keep_open_on_suspend: bool = True
 
 
 _SSE_SESSIONS: dict[str, SseSession] = {}
@@ -773,6 +793,13 @@ def _render_error_html(data: dict) -> str:
     )
 
 
+def _render_awaiting_html(data: dict) -> str:
+    """Rendered when the orchestrator yields with AWAITING_CONFIRMATION.
+    Acts as the visual "we paused here, click Confirm above" banner."""
+    msg = _html_escape(data.get("message", "awaiting user confirmation"))
+    return f'<div class="loop-awaiting">⏸ {msg}</div>'
+
+
 # Keyword-based intent inference. This is deliberately simple — the
 # demo's "blank labels" symptom deterministically routes to CALIBRATE,
 # and the GENERAL fallback runs everything (correct, just slower) for
@@ -830,16 +857,18 @@ class DiagnoseStartRequest(BaseModel):
 
 
 @app.post("/diagnose-start", response_class=HTMLResponse)
-async def diagnose_start(req: DiagnoseStartRequest):
+async def diagnose_start(
+    symptom: str = Form(...),
+    printer_ip: str = Form("192.168.99.10"),
+):
     """Create a session and return an HTML fragment that opens the SSE
     stream. The diagnose loop itself runs inside /diagnose-stream/{id}.
-
     HTMX form submissions expect HTML responses, not open SSE streams.
     Splitting into "create + return wiring" and "stream events" lets a
     one-shot form post both create the session and embed the live
     stream connector that does the actual streaming.
     """
-    session_id, session = _create_sse_session(req.symptom, req.printer_ip)
+    session_id, session = _create_sse_session(symptom, printer_ip)
     intent = session.state.loop_intent.value
     # `sse-swap` accepts a comma-separated list of event names. The
     # leading element is the JSON-formatted complete event so HTMX swaps
@@ -848,7 +877,7 @@ async def diagnose_start(req: DiagnoseStartRequest):
     html = (
         f'<div hx-ext="sse" '
         f'sse-connect="/diagnose-stream/{session_id}" '
-        f'sse-swap="session-html,evidence-html,action-html,complete-html,error-html" '
+        f'sse-swap="session-html,evidence-html,action-html,awaiting-html,complete-html,error-html" '
         f'hx-swap="beforeend">'
         f'  <div class="session-header">Session <code>{session_id[:8]}</code> '
         f'(intent: <strong>{_html_escape(intent)}</strong>)</div>'
@@ -867,10 +896,17 @@ async def diagnose_post(req: StreamDiagnoseRequest):
     two-step /diagnose-start + /diagnose-stream/{id} flow for HTMX. Both
     paths share the same session machinery; this one just creates a
     session inline and pipes its stream back.
+
+    `keep_open_on_suspend=False` because there is no resume path through
+    this endpoint — once the loop suspends with AWAITING_CONFIRMATION the
+    stream closes cleanly. The HTMX flow uses /diagnose-stream/{id} which
+    DOES keep the stream open so /confirm/{token} can resume.
     """
     session_id, session = _create_sse_session(req.symptom, req.printer_ip)
     return _stream_session_response(
-        session_id, session, max_steps=req.max_steps, force_tier=req.force_tier,
+        session_id, session,
+        max_steps=req.max_steps, force_tier=req.force_tier,
+        keep_open_on_suspend=False,
     )
 
 
@@ -889,7 +925,9 @@ async def diagnose_stream_get(session_id: str):
         # caller to track connection state.
         raise HTTPException(409, "session already streaming")
     return _stream_session_response(
-        session_id, session, max_steps=10, force_tier="auto",
+        session_id, session,
+        max_steps=10, force_tier="auto",
+        keep_open_on_suspend=True,
     )
 
 
@@ -899,10 +937,12 @@ def _stream_session_response(
     *,
     max_steps: int,
     force_tier: str,
+    keep_open_on_suspend: bool = True,
 ) -> StreamingResponse:
     """Start the agent loop in a worker thread and return an SSE
     StreamingResponse that drains the session's event_queue.
     """
+    session.keep_open_on_suspend = keep_open_on_suspend
     loop = asyncio.get_event_loop()
     session.task = asyncio.create_task(
         _run_loop_with_events(
@@ -923,16 +963,27 @@ def _stream_session_response(
         while True:
             try:
                 event = await asyncio.wait_for(
-                    session.event_queue.get(), timeout=30.0
+                    session.event_queue.get(), timeout=2.0
                 )
+                yield event
+                if session.completed and session.event_queue.empty():
+                    break
             except asyncio.TimeoutError:
-                # SSE comment line — keeps proxies/load balancers from
-                # closing the connection mid-loop while the agent thinks.
+                # The bridge has gone idle. Three cases:
+                # 1. Loop running, just slow — emit keepalive and continue.
+                # 2. Loop terminal (completed=True) — flag drives normal exit.
+                # 3. Loop suspended (AWAITING_CONFIRMATION). For the HTMX
+                #    flow we keep waiting; for the legacy /diagnose POST
+                #    (keep_open_on_suspend=False) we drain and close.
+                if (
+                    not session.keep_open_on_suspend
+                    and session.task is not None
+                    and session.task.done()
+                    and session.event_queue.empty()
+                    and not session.completed
+                ):
+                    break
                 yield ": keepalive\n\n"
-                continue
-            yield event
-            if session.completed and session.event_queue.empty():
-                break
 
     return StreamingResponse(
         event_generator(), media_type="text/event-stream"
@@ -953,10 +1004,19 @@ async def _run_loop_with_events(
     in-place mutations (Phase 4.3 update_action_status) — without that,
     the EXECUTED → VERIFYING → RESOLVED transitions would be invisible
     to the frontend.
+
+    Phase 4.4: the bridge can be re-invoked on the same session after a
+    confirmation. Emission counters live on the session so the resume
+    pass does not re-emit already-streamed history. When the orchestrator
+    yields with AWAITING_CONFIRMATION the bridge emits an `awaiting`
+    event and returns *without* setting `session.completed` — the SSE
+    generator stays alive on the queue's keepalive until the resume
+    path pushes more events.
     """
     state = session.state
-    last_evidence_count = 0
-    last_action_status: dict[str, str] = {}
+    # Stash the args so a resume path can re-launch with the same config.
+    session.max_steps = max_steps
+    session.force_tier = force_tier
 
     def emit_pair(event_type: str, data: dict, html: str) -> None:
         # asyncio.Queue.put_nowait is not thread-safe; use call_soon_threadsafe
@@ -967,23 +1027,26 @@ async def _run_loop_with_events(
         )
 
     def flush_new_state() -> None:
-        nonlocal last_evidence_count
-        for ev in state.evidence[last_evidence_count:]:
+        for ev in state.evidence[session.last_evidence_emitted:]:
             d = _evidence_to_dict(ev)
             emit_pair("evidence", d, _render_evidence_html(d))
-        last_evidence_count = len(state.evidence)
+        session.last_evidence_emitted = len(state.evidence)
 
         # Emit on every new entry AND on every status change of an
-        # existing entry. The status_history snapshot is what makes the
-        # 4.3 mutation flow visible to the SSE consumer.
+        # existing entry. The per-entry_id status snapshot survives
+        # across resumes — already-emitted statuses don't re-fire.
         for action in state.action_log:
-            current_status = action.status.value if hasattr(action.status, "value") else str(action.status)
-            previous = last_action_status.get(action.entry_id)
+            current_status = (
+                action.status.value
+                if hasattr(action.status, "value")
+                else str(action.status)
+            )
+            previous = session.last_action_status.get(action.entry_id)
             if previous == current_status:
                 continue
             d = _action_to_dict(action)
             emit_pair("action", d, _render_action_html(d))
-            last_action_status[action.entry_id] = current_status
+            session.last_action_status[action.entry_id] = current_status
 
     # Kick the orchestrator off in a worker thread.
     loop_future = asyncio.to_thread(
@@ -1001,20 +1064,45 @@ async def _run_loop_with_events(
     except Exception as exc:  # noqa: BLE001
         logger.exception("SSE loop error: %s", exc)
         emit_pair("error", {"message": str(exc)}, _render_error_html({"message": str(exc)}))
-    finally:
+        # Treat unexpected exceptions as terminal — fall through to the
+        # complete path so the SSE generator can drain and close.
         session.completed = True
-        outcome = (
-            state.loop_status.value
-            if hasattr(state.loop_status, "value")
-            else str(state.loop_status)
-        )
         complete_data = {
-            "outcome": outcome,
+            "outcome": "error",
             "evidence_count": len(state.evidence),
             "action_count": len(state.action_log),
-            "is_resolved": state.is_resolved(),
+            "is_resolved": False,
         }
         emit_pair("complete", complete_data, _render_complete_html(complete_data))
+        return
+
+    # Loop returned cleanly — was it a suspension or terminal?
+    if state.loop_status == LoopStatus.AWAITING_CONFIRMATION:
+        awaiting_data = {
+            "outcome": state.loop_status.value,
+            "message": "awaiting user confirmation",
+        }
+        emit_pair("awaiting", awaiting_data, _render_awaiting_html(awaiting_data))
+        # Do NOT set session.completed — the SSE generator stays open on
+        # keepalive frames until the /confirm/{token} endpoint relaunches
+        # the bridge and resumes pushing events.
+        return
+
+    # Terminal outcome (SUCCESS, ESCALATED, MAX_STEPS, ...). Mark the
+    # session done and emit the complete event.
+    session.completed = True
+    outcome = (
+        state.loop_status.value
+        if hasattr(state.loop_status, "value")
+        else str(state.loop_status)
+    )
+    complete_data = {
+        "outcome": outcome,
+        "evidence_count": len(state.evidence),
+        "action_count": len(state.action_log),
+        "is_resolved": state.is_resolved(),
+    }
+    emit_pair("complete", complete_data, _render_complete_html(complete_data))
 
 
 @app.post("/confirm/{token}")
@@ -1065,11 +1153,29 @@ async def confirm_token_stream(token: str):
                 source="human_confirmation",
                 content=f"Action '{entry.action}' confirmed via SSE token by operator.",
             )
+
+            # Resume the orchestrator. Phase 4.4: the loop suspended with
+            # loop_status=AWAITING_CONFIRMATION; flipping it back to RUNNING
+            # makes the orchestrator's while-predicate true again, and a
+            # fresh bridge task pushes the resumed events down the same
+            # SSE stream the user is watching. Per-session emission counters
+            # keep the stream from re-emitting history.
+            session.state.loop_status = LoopStatus.RUNNING
+            loop = asyncio.get_event_loop()
+            session.task = asyncio.create_task(
+                _run_loop_with_events(
+                    session,
+                    max_steps=session.max_steps,
+                    force_tier=session.force_tier,
+                    loop=loop,
+                )
+            )
             return {
                 "status": "approved",
                 "action": entry.action,
                 "session_id": session_id,
                 "entry_id": entry_id,
+                "resumed": True,
             }
         # Should not happen — confirmation_tokens stores entry_ids that
         # exist in action_log. If we get here, state is corrupt.
