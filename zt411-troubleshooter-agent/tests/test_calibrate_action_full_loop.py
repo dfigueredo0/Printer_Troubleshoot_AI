@@ -76,6 +76,23 @@ def patched_calibrate_happy_path(monkeypatch, calibrate_calls):
         "zt411_agent.agent.device_specialist.zpl_zt411_host_status",
         replay["zpl_zt411_host_status"],
     )
+    # Phase 4.2: identity + alerts now via ZPL.
+    monkeypatch.setattr(
+        "zt411_agent.agent.tools.zpl_zt411_host_identification",
+        replay["zpl_zt411_host_identification"],
+    )
+    monkeypatch.setattr(
+        "zt411_agent.agent.device_specialist.zpl_zt411_host_identification",
+        replay["zpl_zt411_host_identification"],
+    )
+    monkeypatch.setattr(
+        "zt411_agent.agent.tools.zpl_zt411_extended_status",
+        replay["zpl_zt411_extended_status"],
+    )
+    monkeypatch.setattr(
+        "zt411_agent.agent.device_specialist.zpl_zt411_extended_status",
+        replay["zpl_zt411_extended_status"],
+    )
 
     def stub_calibrate(ip, port=9100):
         calibrate_calls["count"] += 1
@@ -99,7 +116,9 @@ def _initial_state() -> AgentState:
 
 
 def _confirm_first_pending_calibrate(state: AgentState) -> str:
-    """Mimic service/app.py::confirm_action: pull token, find entry, flip status."""
+    """Mimic service/app.py::confirm_token_stream: pull token, find entry,
+    update status through the helper so status_history is appended.
+    """
     pending = [
         a for a in state.action_log
         if a.action == "zpl_zt411_calibrate"
@@ -110,11 +129,9 @@ def _confirm_first_pending_calibrate(state: AgentState) -> str:
     assert token, f"validator should have issued a token (entry={pending[0].entry_id})"
     entry_id = state.consume_confirmation_token(token)
     assert entry_id == pending[0].entry_id
-    for entry in state.action_log:
-        if entry.entry_id == entry_id:
-            entry.status = ActionStatus.CONFIRMED
-            return entry_id
-    raise AssertionError(f"entry_id {entry_id} not found in action_log")
+    updated = state.update_action_status(entry_id, ActionStatus.CONFIRMED)
+    assert updated is not None, f"entry_id {entry_id} not found in action_log"
+    return entry_id
 
 
 def _calibrate_entries(state: AgentState) -> List:
@@ -145,17 +162,22 @@ class TestCalibrateActionFullLoop:
         _confirm_first_pending_calibrate(state)
         ds.act(state); val.act(state)
 
+        # Phase 4.3: one logical entry transitions through every stage.
         cals = _calibrate_entries(state)
-        statuses = [a.status for a in cals]
-        assert ActionStatus.CONFIRMED in statuses
-        assert ActionStatus.EXECUTED in statuses
+        assert len(cals) == 1
+        history = cals[0].status_history
+        assert ActionStatus.PENDING in history
+        assert ActionStatus.CONFIRMED in history
+        assert ActionStatus.EXECUTED in history
+        assert ActionStatus.VERIFYING in history
+        assert ActionStatus.RESOLVED in history
+        assert cals[0].status == ActionStatus.RESOLVED, (
+            f"expected final status RESOLVED, got {cals[0].status.value}"
+        )
         assert calibrate_calls["count"] == 1
         assert calibrate_calls["ips"] == [PRINTER_IP]
-
-        executed = [a for a in cals if a.status == ActionStatus.EXECUTED]
-        assert len(executed) == 1
-        assert "post-state healthy" in executed[0].result
-        assert "sent_bytes=3" in executed[0].result
+        assert "post-state healthy" in cals[0].result
+        assert "sent_bytes=3" in cals[0].result
 
     def test_device_ready_flips_after_executed(
         self, patched_calibrate_happy_path
@@ -192,10 +214,10 @@ class TestCalibrateActionFullLoop:
     def test_full_lifecycle_entry_sequence(
         self, patched_calibrate_happy_path
     ):
-        """The action_log entries for zpl_zt411_calibrate, in order,
-        should walk PENDING -> CONFIRMED -> EXECUTED. No ABORTED enum
-        churn — FAILED with a precondition message would appear here on
-        the unhappy path."""
+        """The action's status_history should walk
+        PENDING -> CONFIRMED -> EXECUTED -> VERIFYING -> RESOLVED on the
+        happy path. FAILED with a precondition message would replace the
+        tail on the unhappy path."""
         state = _initial_state()
         ds = DeviceSpecialist()
         val = ValidationSpecialist()
@@ -204,17 +226,26 @@ class TestCalibrateActionFullLoop:
         _confirm_first_pending_calibrate(state)
         ds.act(state); val.act(state)
 
-        statuses = [a.status for a in _calibrate_entries(state)]
-        assert statuses == [ActionStatus.CONFIRMED, ActionStatus.EXECUTED], (
-            f"unexpected lifecycle: {[s.value for s in statuses]}"
+        cals = _calibrate_entries(state)
+        assert len(cals) == 1, (
+            f"expected one logical entry, got {len(cals)}"
         )
+        history = cals[0].status_history
+        assert history == [
+            ActionStatus.PENDING,
+            ActionStatus.CONFIRMED,
+            ActionStatus.EXECUTED,
+            ActionStatus.VERIFYING,
+            ActionStatus.RESOLVED,
+        ], f"unexpected lifecycle: {[s.value for s in history]}"
 
     def test_active_fault_at_execution_aborts_with_FAILED(
         self, monkeypatch, calibrate_calls
     ):
         """If a fault appears between confirmation and execution, the
-        action does NOT fire and a FAILED entry records the precondition
-        violation. Original CONFIRMED entry stays for audit history."""
+        action does NOT fire and the entry is flipped to FAILED with a
+        precondition-violation result. Phase 4.3: the original PENDING
+        and CONFIRMED states stay in status_history for audit."""
         # Iteration 1: idle baseline -> propose
         idle_replay = make_fixture_replay("zt411_fixture_idle_baseline.json")
         monkeypatch.setattr(
@@ -238,6 +269,22 @@ class TestCalibrateActionFullLoop:
         monkeypatch.setattr(
             "zt411_agent.agent.device_specialist.zpl_zt411_host_status",
             idle_replay["zpl_zt411_host_status"],
+        )
+        monkeypatch.setattr(
+            "zt411_agent.agent.tools.zpl_zt411_host_identification",
+            idle_replay["zpl_zt411_host_identification"],
+        )
+        monkeypatch.setattr(
+            "zt411_agent.agent.device_specialist.zpl_zt411_host_identification",
+            idle_replay["zpl_zt411_host_identification"],
+        )
+        monkeypatch.setattr(
+            "zt411_agent.agent.tools.zpl_zt411_extended_status",
+            idle_replay["zpl_zt411_extended_status"],
+        )
+        monkeypatch.setattr(
+            "zt411_agent.agent.device_specialist.zpl_zt411_extended_status",
+            idle_replay["zpl_zt411_extended_status"],
         )
         called = {"n": 0}
 

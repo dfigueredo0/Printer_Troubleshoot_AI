@@ -51,6 +51,8 @@ class ActionStatus(str, Enum):
     PENDING = "pending"
     CONFIRMED = "confirmed"
     EXECUTED = "executed"
+    VERIFYING = "verifying"   # post-execution settle window before verify
+    RESOLVED = "resolved"     # verified post-state healthy
     SKIPPED = "skipped"
     FAILED = "failed"
 
@@ -61,6 +63,19 @@ class LoopStatus(str, Enum):
     ESCALATED = "escalated"
     MAX_STEPS = "max_steps"
     TIMEOUT = "timeout"
+
+
+class LoopIntent(str, Enum):
+    """High-level intent of a diagnostic loop. Used to gate optional
+    tool calls (e.g. consumables read) that aren't needed for every
+    symptom path. The default GENERAL runs everything, preserving
+    pre-Phase-4 behavior for callers that don't set an intent.
+    """
+    GENERAL = "general"
+    CALIBRATE = "calibrate"
+    DIAGNOSE_CONSUMABLES = "diagnose_consumables"
+    DIAGNOSE_PRINT_QUALITY = "diagnose_print_quality"
+    DIAGNOSE_NETWORK = "diagnose_network"
 
 
 class DeviceInfo(BaseModel):
@@ -104,9 +119,21 @@ class ActionLogEntry(BaseModel):
     action: str
     risk: RiskLevel = RiskLevel.SAFE
     status: ActionStatus = ActionStatus.PENDING
+    # Full chronological status history for one logical action. Phase 4.3
+    # introduced VERIFYING + RESOLVED, and the demo UI needs to show the
+    # row transitioning through every state — so each transition appends
+    # here in addition to flipping `status`. Initialised in __init__ via
+    # a Field default_factory so each entry gets its own list.
+    status_history: list[ActionStatus] = Field(default_factory=list)
     confirmation_token: str = ""
     result: str = ""
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+    def model_post_init(self, __context: Any) -> None:  # noqa: D401
+        # Seed the history with the initial status so callers can read
+        # `status_history[0]` without first having to call update_action_status.
+        if not self.status_history:
+            self.status_history = [self.status]
 
 
 class SnapshotDiff(BaseModel):
@@ -210,6 +237,7 @@ class AgentState(BaseModel):
     # ------------------------------------------------------------------
     loop_counter: int = 0
     loop_status: LoopStatus = LoopStatus.RUNNING
+    loop_intent: LoopIntent = LoopIntent.GENERAL
     last_specialist: str = ""
     escalation_reason: str = ""
 
@@ -277,6 +305,34 @@ class AgentState(BaseModel):
         )
         self.snapshot_diffs.append(diff)
         return diff
+
+    def update_action_status(
+        self,
+        entry_id: str,
+        new_status: ActionStatus,
+        result: str | None = None,
+    ) -> ActionLogEntry | None:
+        """Mutate an existing action_log entry in place.
+
+        Phase 4.3: action lifecycle is one logical entry that transitions
+        through PENDING → CONFIRMED → EXECUTED → VERIFYING → RESOLVED
+        (or any branch into FAILED). The frontend renders one row per
+        entry_id and replaces it in place via HTMX OOB swap on each
+        status change, so we mutate rather than append. The full
+        transition history lives on `status_history`.
+
+        Returns the mutated entry, or None if no entry has that id.
+        """
+        for entry in self.action_log:
+            if entry.entry_id != entry_id:
+                continue
+            entry.status = new_status
+            entry.status_history.append(new_status)
+            if result is not None:
+                entry.result = result
+            entry.timestamp = datetime.now(timezone.utc)
+            return entry
+        return None
 
     def issue_confirmation_token(self, entry_id: str) -> str:
         token = str(uuid.uuid4())

@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>ZT411 Troubleshooter</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="/static/vendor/htmx.min.js"></script>
+  <script src="/static/vendor/htmx-sse.js"></script>
+</head>
+<body>
+  <div class="app">
+    <aside class="left-pane">
+      <h1>ZT411 Troubleshooter</h1>
+      <div id="connection-status"
+           hx-get="/health"
+           hx-trigger="load, every 5s"
+           hx-swap="innerHTML">…</div>
+
+      <form id="diagnose-form"
+            hx-post="/diagnose-start"
+            hx-target="#stream-target"
+            hx-swap="innerHTML">
+        <label>
+          Symptom
+          <textarea name="symptom" rows="3" required
+                    placeholder="e.g. printer is printing blank labels"></textarea>
+        </label>
+        <label>
+          Printer IP
+          <input name="printer_ip" value="192.168.99.10" required>
+        </label>
+        <button type="submit">Diagnose</button>
+      </form>
+    </aside>
+
+    <main class="right-pane">
+      <h2>Reasoning</h2>
+      <div id="stream-target">
+        <p class="placeholder">No active session. Submit a symptom to begin.</p>
+      </div>
+    </main>
+  </div>
+
+  <script>
+    document.body.addEventListener('htmx:responseError', (e) => {
+      if (e.detail.elt && e.detail.elt.id === 'connection-status') {
+        e.detail.elt.innerHTML =
+          '<span class="unhealthy">&#x25CF; Disconnected</span>';
+      }
+    });
+  </script>
+</body>
+</html>

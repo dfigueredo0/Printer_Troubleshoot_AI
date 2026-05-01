@@ -213,6 +213,149 @@ def replay_zpl_zt411_host_status(
     return _host_status
 
 
+# ---------------------------------------------------------------------------
+# ZPL ~HI replay (Phase 4.2 — replaces snmp_zt411_status as the
+# device-specialist identity read on hardware where SNMP is unreachable).
+# Identity does not change with printer state, so a single canned
+# response covers every fixture stem. Format per Zebra ZPL Programming
+# Guide §~HI (lab-tested 2026-04-30 against firmware V92.21.39Z):
+#     ZT411-200dpi,V92.21.39Z,8,8176KB
+# ---------------------------------------------------------------------------
+
+_HI_RESPONSE: str = "ZT411-200dpi,V92.21.39Z,8,8176KB"
+
+
+def replay_zpl_zt411_host_identification(
+    fixture_path: str | Path,  # noqa: ARG001 — accepted for API symmetry
+) -> Callable[..., ToolResult]:
+    """Build a zpl_zt411_host_identification replacement.
+
+    The same identity response is returned for every fixture state
+    (printer model + firmware are state-independent). Parses through
+    the production parser logic so consumers see the exact production
+    dict shape.
+    """
+    def _host_id(ip: str, port: int = 9100) -> ToolResult:
+        parts = [p.strip() for p in _HI_RESPONSE.split(",")]
+        if len(parts) < 4:
+            return ToolResult(
+                success=False,
+                error=f"~HI returned {len(parts)} fields, expected 4",
+                raw=_HI_RESPONSE,
+            )
+        try:
+            memory_kb = int(parts[3].rstrip("KB").rstrip("kb"))
+        except ValueError:
+            memory_kb = -1
+        return ToolResult(
+            success=True,
+            output={
+                "model": parts[0],
+                "firmware": parts[1],
+                "memory_option": parts[2],
+                "memory_kb": memory_kb,
+                "raw_response": _HI_RESPONSE,
+            },
+            raw=_HI_RESPONSE,
+        )
+
+    return _host_id
+
+
+# ---------------------------------------------------------------------------
+# ZPL ~HQES replay (Phase 4.2 — replaces snmp_zt411_alerts on hardware
+# where SNMP is unreachable). One canned response per fixture state.
+# Lab-tested format (firmware V92.21.39Z, 2026-04-30):
+#       PRINTER STATUS
+#        ERRORS:         0 00000000 00000000
+#        WARNINGS:       0 00000000 00000000
+# Faults map to errors_count=1 with a non-zero bitmask byte. Bitmask
+# decoding is deferred (phase 5); the count is what the demo uses.
+# ---------------------------------------------------------------------------
+
+_HQES_BY_STATE: Dict[str, str] = {
+    # Healthy / no-fault: zero counts, zero bitmasks.
+    "idle_baseline":
+        "  PRINTER STATUS\n   ERRORS:         0 00000000 00000000\n"
+        "   WARNINGS:       0 00000000 00000000\n",
+    "post_test_idle":
+        "  PRINTER STATUS\n   ERRORS:         0 00000000 00000000\n"
+        "   WARNINGS:       0 00000000 00000000\n",
+    # User-pressed pause: pause is not an "error" or "warning" per
+    # ~HQES on this firmware — the counts stay zero. (~HS surfaces it.)
+    "paused":
+        "  PRINTER STATUS\n   ERRORS:         0 00000000 00000000\n"
+        "   WARNINGS:       0 00000000 00000000\n",
+    # Physical faults — errors_count=1, plausible non-zero bitmask byte.
+    # The exact bitmask bit position is firmware-defined and decoded in
+    # phase 5; for the demo, the count is what matters.
+    "head_open":
+        "  PRINTER STATUS\n   ERRORS:         1 00000004 00000000\n"
+        "   WARNINGS:       0 00000000 00000000\n",
+    "media_out":
+        "  PRINTER STATUS\n   ERRORS:         1 00000001 00000000\n"
+        "   WARNINGS:       0 00000000 00000000\n",
+    "ribbon_out":
+        "  PRINTER STATUS\n   ERRORS:         1 00000002 00000000\n"
+        "   WARNINGS:       0 00000000 00000000\n",
+}
+
+
+def replay_zpl_zt411_extended_status(
+    fixture_path: str | Path,
+) -> Callable[..., ToolResult]:
+    """Build a zpl_zt411_extended_status replacement bound to one fixture's state.
+
+    Returns the same dict shape as the production parser. Unknown
+    states fall back to "healthy" (zero counts) — this keeps tests that
+    add fixtures later from breaking before someone fills in the
+    canonical response.
+    """
+    stem = _state_stem(fixture_path)
+    response = _HQES_BY_STATE.get(stem) or _HQES_BY_STATE["idle_baseline"]
+
+    def _ext_status(ip: str, port: int = 9100) -> ToolResult:
+        lines = response.strip().splitlines()
+        out: Dict[str, Any] = {
+            "errors_count": -1,
+            "warnings_count": -1,
+            "errors_bitmask_1": "",
+            "errors_bitmask_2": "",
+            "warnings_bitmask_1": "",
+            "warnings_bitmask_2": "",
+            "raw_response": response,
+        }
+        for line in lines:
+            stripped = line.strip()
+            if stripped.startswith("ERRORS:"):
+                tokens = stripped.replace("ERRORS:", "").split()
+                if len(tokens) >= 3:
+                    try:
+                        out["errors_count"] = int(tokens[0])
+                    except ValueError:
+                        pass
+                    out["errors_bitmask_1"] = tokens[1]
+                    out["errors_bitmask_2"] = tokens[2]
+            elif stripped.startswith("WARNINGS:"):
+                tokens = stripped.replace("WARNINGS:", "").split()
+                if len(tokens) >= 3:
+                    try:
+                        out["warnings_count"] = int(tokens[0])
+                    except ValueError:
+                        pass
+                    out["warnings_bitmask_1"] = tokens[1]
+                    out["warnings_bitmask_2"] = tokens[2]
+        if out["errors_count"] == -1 and out["warnings_count"] == -1:
+            return ToolResult(
+                success=False,
+                error="~HQES response did not contain ERRORS: or WARNINGS: lines",
+                raw=response,
+            )
+        return ToolResult(success=True, output=out, raw=response)
+
+    return _ext_status
+
+
 def make_fixture_replay(fixture_path: str | Path) -> Dict[str, Callable[..., ToolResult]]:
     """Bundle all replay callables for a single fixture.
 
@@ -234,12 +377,30 @@ def make_fixture_replay(fixture_path: str | Path) -> Dict[str, Callable[..., Too
             "zt411_agent.agent.device_specialist.zpl_zt411_host_status",
             replay["zpl_zt411_host_status"],
         )
+        # Phase 4.2: identity + alerts moved to ZPL ~HI / ~HQES — same
+        # dual-namespace patching pattern.
+        monkeypatch.setattr("zt411_agent.agent.tools.zpl_zt411_host_identification",
+                            replay["zpl_zt411_host_identification"])
+        monkeypatch.setattr(
+            "zt411_agent.agent.device_specialist.zpl_zt411_host_identification",
+            replay["zpl_zt411_host_identification"],
+        )
+        monkeypatch.setattr("zt411_agent.agent.tools.zpl_zt411_extended_status",
+                            replay["zpl_zt411_extended_status"])
+        monkeypatch.setattr(
+            "zt411_agent.agent.device_specialist.zpl_zt411_extended_status",
+            replay["zpl_zt411_extended_status"],
+        )
     """
     return {
         "snmp_get": replay_snmp_get(fixture_path),
         "snmp_walk": replay_snmp_walk(fixture_path),
         "ipp_get_attributes": replay_ipp_get_attributes(fixture_path),
         "zpl_zt411_host_status": replay_zpl_zt411_host_status(fixture_path),
+        "zpl_zt411_host_identification":
+            replay_zpl_zt411_host_identification(fixture_path),
+        "zpl_zt411_extended_status":
+            replay_zpl_zt411_extended_status(fixture_path),
     }
 
 

@@ -108,6 +108,24 @@ def patched_tools(monkeypatch):
         "zt411_agent.agent.device_specialist.zpl_zt411_host_status",
         replay["zpl_zt411_host_status"],
     )
+    # Phase 4.2: ~HI / ~HQES replace snmp_zt411_status / snmp_zt411_alerts.
+    # Same dual-namespace pattern.
+    monkeypatch.setattr(
+        "zt411_agent.agent.tools.zpl_zt411_host_identification",
+        replay["zpl_zt411_host_identification"],
+    )
+    monkeypatch.setattr(
+        "zt411_agent.agent.device_specialist.zpl_zt411_host_identification",
+        replay["zpl_zt411_host_identification"],
+    )
+    monkeypatch.setattr(
+        "zt411_agent.agent.tools.zpl_zt411_extended_status",
+        replay["zpl_zt411_extended_status"],
+    )
+    monkeypatch.setattr(
+        "zt411_agent.agent.device_specialist.zpl_zt411_extended_status",
+        replay["zpl_zt411_extended_status"],
+    )
 
     # Network probes — stubbed so the loop never hits the real network.
     # The network specialist imports these names directly from tools, so

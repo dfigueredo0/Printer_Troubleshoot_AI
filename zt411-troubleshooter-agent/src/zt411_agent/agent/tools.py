@@ -1160,6 +1160,131 @@ def zpl_zt411_print_config(ip: str, port: int = 9100) -> ToolResult:
     return _zpl_send_over_9100(ip, b"~WC", expect_response=False, port=port)
 
 
+def zpl_zt411_host_identification(ip: str, port: int = 9100) -> ToolResult:
+    """Read ZT411 identity via ZPL `~HI` over TCP 9100.
+
+    Replacement for `snmp_zt411_status` on the demo path. Lab-tested
+    response format (firmware V92.21.39Z, 2026-04-30):
+        ZT411-200dpi,V92.21.39Z,8,8176KB
+
+    Missing vs. SNMP: serial number — there is no ZPL host-query that
+    returns it on this firmware. For demo identity (model + firmware)
+    this is sufficient.
+
+    Returns output={
+        'model': str,
+        'firmware': str,
+        'memory_option': str,
+        'memory_kb': int,           # -1 if KB suffix can't be parsed
+        'raw_response': str,
+    }
+    """
+    r = _zpl_send_over_9100(ip, b"~HI", expect_response=True, port=port)
+    if not r.success:
+        return r
+
+    response = (r.output or {}).get("response", "").strip()
+    parts = [p.strip() for p in response.split(",")]
+    if len(parts) < 4:
+        return ToolResult(
+            success=False,
+            error=f"~HI returned {len(parts)} fields, expected 4",
+            raw=response,
+        )
+
+    try:
+        memory_kb = int(parts[3].rstrip("KB").rstrip("kb"))
+    except ValueError:
+        memory_kb = -1
+
+    return ToolResult(
+        success=True,
+        output={
+            "model": parts[0],
+            "firmware": parts[1],
+            "memory_option": parts[2],
+            "memory_kb": memory_kb,
+            "raw_response": response,
+        },
+        raw=response,
+    )
+
+
+def zpl_zt411_extended_status(ip: str, port: int = 9100) -> ToolResult:
+    """Read ZT411 extended error/warning status via ZPL `~HQES`.
+
+    Replacement for `snmp_zt411_alerts` on the demo path. Lab-tested
+    response format (firmware V92.21.39Z, 2026-04-30):
+          PRINTER STATUS
+           ERRORS:         0 00000000 00000000
+           WARNINGS:       0 00000000 00000000
+
+    The error/warning counts (column 1 after the label) are the
+    demo-relevant fields — the precondition check before executing
+    calibrate is "errors == 0 and warnings == 0". Bitmask interpretation
+    is deferred (see TODO).
+
+    Returns output={
+        'errors_count': int,           # -1 if not present
+        'warnings_count': int,         # -1 if not present
+        'errors_bitmask_1': str,       # 8-char hex
+        'errors_bitmask_2': str,
+        'warnings_bitmask_1': str,
+        'warnings_bitmask_2': str,
+        'raw_response': str,
+    }
+    """
+    r = _zpl_send_over_9100(ip, b"~HQES", expect_response=True, port=port)
+    if not r.success:
+        return r
+
+    response = (r.output or {}).get("response", "")
+    lines = response.strip().splitlines()
+
+    out: Dict[str, Any] = {
+        "errors_count": -1,
+        "warnings_count": -1,
+        "errors_bitmask_1": "",
+        "errors_bitmask_2": "",
+        "warnings_bitmask_1": "",
+        "warnings_bitmask_2": "",
+        "raw_response": response,
+    }
+
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("ERRORS:"):
+            tokens = stripped.replace("ERRORS:", "").split()
+            if len(tokens) >= 3:
+                try:
+                    out["errors_count"] = int(tokens[0])
+                except ValueError:
+                    pass
+                out["errors_bitmask_1"] = tokens[1]
+                out["errors_bitmask_2"] = tokens[2]
+        elif stripped.startswith("WARNINGS:"):
+            tokens = stripped.replace("WARNINGS:", "").split()
+            if len(tokens) >= 3:
+                try:
+                    out["warnings_count"] = int(tokens[0])
+                except ValueError:
+                    pass
+                out["warnings_bitmask_1"] = tokens[1]
+                out["warnings_bitmask_2"] = tokens[2]
+
+    if out["errors_count"] == -1 and out["warnings_count"] == -1:
+        return ToolResult(
+            success=False,
+            error="~HQES response did not contain ERRORS: or WARNINGS: lines",
+            raw=response,
+        )
+
+    # TODO(phase5): decode bitmask fields into named conditions per the
+    # ZPL Programming Guide bit-name mapping. Counts are sufficient for
+    # the calibrate demo's precondition check.
+    return ToolResult(success=True, output=out, raw=response)
+
+
 def ipp_get_attributes(ip: str, port: int = 631) -> ToolResult:
     """Read IPP printer attributes via GET-PRINTER-ATTRIBUTES request.
 
@@ -1704,6 +1829,8 @@ def _build_default_registry() -> ToolRegistry:
         (ToolSchema("zpl_zt411_status", "ZT411 ZPL status read (alias)", "per_tool", 5.0), zpl_zt411_status),
         (ToolSchema("zpl_zt411_calibrate", "ZT411 ZPL ~JC media calibration", "per_printer", 10.0), zpl_zt411_calibrate),
         (ToolSchema("zpl_zt411_print_config", "ZT411 ZPL ~WC print config label", "per_printer", 10.0), zpl_zt411_print_config),
+        (ToolSchema("zpl_zt411_host_identification", "ZT411 ZPL ~HI identity read", "per_printer", 10.0), zpl_zt411_host_identification),
+        (ToolSchema("zpl_zt411_extended_status", "ZT411 ZPL ~HQES error/warning read", "per_printer", 10.0), zpl_zt411_extended_status),
         # Windows
         (ToolSchema("ps_query_spooler", "Query Spooler service", "per_tool", 10.0), ps_query_spooler),
         (ToolSchema("ps_enum_printers", "Enumerate Windows printers", "per_tool", 15.0), ps_enum_printers),

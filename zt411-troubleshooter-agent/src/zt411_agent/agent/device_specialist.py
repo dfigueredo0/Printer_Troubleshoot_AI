@@ -12,10 +12,22 @@ from .tools import (
     snmp_zt411_consumables,
     snmp_zt411_alerts,
     zpl_zt411_host_status,
+    zpl_zt411_host_identification,
+    zpl_zt411_extended_status,
     ipp_get_attributes,
     map_error_code_to_kb,
 )
-from ..state import AgentState, ActionStatus, RiskLevel
+from ..state import AgentState, ActionStatus, LoopIntent, RiskLevel
+
+# Loop intents for which the consumables read is worth the UDP/161
+# round-trip. Kept here (rather than parameterized per-call) so the gate
+# is auditable in one place. GENERAL preserves pre-Phase-4 behavior for
+# callers that don't set an intent.
+_CONSUMABLES_INTENTS = {
+    LoopIntent.GENERAL,
+    LoopIntent.DIAGNOSE_CONSUMABLES,
+    LoopIntent.DIAGNOSE_PRINT_QUALITY,
+}
 
 # Wait between firing an action over TCP 9100 and re-reading state, so
 # the printer has time to update its ~HS response. Empirically 1-3s on
@@ -140,26 +152,37 @@ class DeviceSpecialist(Specialist):
             }
 
         # ------------------------------------------------------------------
-        # 1. SNMP identity + status (only on first contact — these don't change)
+        # 1. Identity (only on first contact — these don't change)
+        #
+        # Phase 4.2: switched from snmp_zt411_status to
+        # zpl_zt411_host_identification (~HI). The lab printer's SNMP
+        # agent is unreachable on UDP/161 — see Phase 2.5 note above.
+        # Trade-off: ~HI does not return a serial number on this firmware,
+        # so state.device.serial stays empty — the demo path doesn't use
+        # it, and the SNMP tool stays available for printers where it
+        # works.
         # ------------------------------------------------------------------
         if state.device_unknown:
-            r = snmp_zt411_status(ip)
+            r = zpl_zt411_host_identification(ip)
             if r.success and r.output:
                 d = r.output
-                if d.get("zbr_model"):
-                    state.device.model = str(d["zbr_model"])
-                if d.get("zbr_firmware"):
-                    state.device.firmware_version = str(d["zbr_firmware"])
+                if d.get("model"):
+                    state.device.model = str(d["model"])
+                if d.get("firmware"):
+                    state.device.firmware_version = str(d["firmware"])
                 content = (
-                    f"SNMP identity {ip}: model='{d.get('zbr_model', '')}' "
-                    f"firmware='{d.get('zbr_firmware', '')}' "
-                    f"sysDescr='{(d.get('sys_descr') or '')[:80]}'"
+                    f"ZPL ~HI identity {ip}: model='{d.get('model', '')}' "
+                    f"firmware='{d.get('firmware', '')}' "
+                    f"memory_kb={d.get('memory_kb', '?')} "
+                    f"(serial: not available via ~HI on this firmware)"
                 )
             else:
-                content = f"SNMP identity poll failed: {r.error}"
+                content = f"ZPL ~HI identity poll failed: {r.error}"
+            # Evidence source label kept stable across the SNMP→ZPL swap
+            # so log/test/metric continuity is preserved.
             ev = state.add_evidence(specialist=self.name, source="snmp_status", content=content)
             evidence_items.append(ev.evidence_id)
-            actions_taken.append("snmp identity poll")
+            actions_taken.append("zpl identity poll")
 
         # ------------------------------------------------------------------
         # 2. Physical flags (always re-read — captures state changes)
@@ -204,53 +227,78 @@ class DeviceSpecialist(Specialist):
 
         # ------------------------------------------------------------------
         # 3. SNMP consumables (boolean presence on this firmware)
+        #
+        # Phase 4.2: gated behind loop_intent. No ZPL equivalent exists
+        # on V92.21.39Z — and the lab printer's SNMP agent has been
+        # intermittently silent on UDP/161 — so paths that don't need
+        # consumables (e.g. CALIBRATE, DIAGNOSE_NETWORK) skip this read
+        # entirely. No evidence entry is emitted on skip; logging "we
+        # didn't do something" is noise.
         # ------------------------------------------------------------------
-        r = snmp_zt411_consumables(ip)
-        if r.success and r.output:
-            d = r.output
-            # Store in dict-shaped form the state schema expects.
-            state.device.consumables = {
-                "media":  {"name": "media",  "state": d.get("media",  "unknown")},
-                "ribbon": {"name": "ribbon", "state": d.get("ribbon", "unknown")},
-                "supports_levels": d.get("supports_levels", False),
-            }
-            content = (
-                f"Consumables {ip}: media={d.get('media')} ribbon={d.get('ribbon')} "
-                f"(presence-only on this firmware; no level data via SNMP)"
-            )
-        else:
-            content = f"SNMP consumables read failed: {r.error}"
-        ev = state.add_evidence(specialist=self.name, source="snmp_consumables", content=content)
-        evidence_items.append(ev.evidence_id)
-        actions_taken.append("snmp consumables read")
+        if state.loop_intent in _CONSUMABLES_INTENTS:
+            r = snmp_zt411_consumables(ip)
+            if r.success and r.output:
+                d = r.output
+                # Store in dict-shaped form the state schema expects.
+                state.device.consumables = {
+                    "media":  {"name": "media",  "state": d.get("media",  "unknown")},
+                    "ribbon": {"name": "ribbon", "state": d.get("ribbon", "unknown")},
+                    "supports_levels": d.get("supports_levels", False),
+                }
+                content = (
+                    f"Consumables {ip}: media={d.get('media')} ribbon={d.get('ribbon')} "
+                    f"(presence-only on this firmware; no level data via SNMP)"
+                )
+            else:
+                content = f"SNMP consumables read failed: {r.error}"
+            ev = state.add_evidence(specialist=self.name, source="snmp_consumables", content=content)
+            evidence_items.append(ev.evidence_id)
+            actions_taken.append("snmp consumables read")
 
         # ------------------------------------------------------------------
-        # 4. SNMP alerts (filter for severity>=3 active faults; ignore boot info)
+        # 4. Extended status (errors / warnings)
+        #
+        # Phase 4.2: switched from snmp_zt411_alerts to
+        # zpl_zt411_extended_status (~HQES). Counts (errors_count /
+        # warnings_count) are the demo-relevant fields — the calibrate
+        # precondition is "errors_count == 0 and warnings_count == 0".
+        # Bitmask interpretation (decoding which named conditions are
+        # set) is deferred to Phase 5 — see TODO in tools.py.
         # ------------------------------------------------------------------
-        r = snmp_zt411_alerts(ip)
-        active_alerts: list[dict] = []
+        r = zpl_zt411_extended_status(ip)
         if r.success and r.output:
-            all_alerts = r.output.get("alerts", []) or []
-            # Severity 1 (informational) includes the persistent boot entry.
-            # Filter to severity>=3 (critical) for live-state interpretation.
-            active_alerts = [a for a in all_alerts if a.get("severity", 0) >= 3]
-            state.device.alerts = [
-                f"group={a.get('group')},code={a.get('code')},sev={a.get('severity')}"
-                for a in active_alerts
-            ]
-            # error_codes: stringified (group, code) pairs for KB lookup keys
-            state.device.error_codes = [
-                f"alert:{a.get('group')}.{a.get('code')}" for a in active_alerts
-            ]
+            d = r.output
+            errors_count = d.get("errors_count", -1)
+            warnings_count = d.get("warnings_count", -1)
+            # Until bitmask decoding lands, the only signal we can offer
+            # the rest of the loop is presence/absence. Generate a coarse
+            # "errors:N" / "warnings:N" code so existing consumers of
+            # state.device.error_codes still get a non-empty list when
+            # the printer is unhealthy. The KB lookup that fires off
+            # error_codes will simply miss until phase 5.
+            alerts: list[str] = []
+            error_codes: list[str] = []
+            if errors_count > 0:
+                alerts.append(
+                    f"errors_count={errors_count} bitmask={d.get('errors_bitmask_1')}.{d.get('errors_bitmask_2')}"
+                )
+                error_codes.append(f"hqes:errors_count={errors_count}")
+            if warnings_count > 0:
+                alerts.append(
+                    f"warnings_count={warnings_count} bitmask={d.get('warnings_bitmask_1')}.{d.get('warnings_bitmask_2')}"
+                )
+            state.device.alerts = alerts
+            state.device.error_codes = error_codes
             content = (
-                f"SNMP alerts {ip}: {len(all_alerts)} total row(s), "
-                f"{len(active_alerts)} active critical: {active_alerts}"
+                f"ZPL ~HQES {ip}: errors={errors_count} warnings={warnings_count} "
+                f"(bitmask decoding deferred to phase 5)"
             )
         else:
-            content = f"SNMP alerts read failed: {r.error}"
+            content = f"ZPL ~HQES read failed: {r.error}"
+        # Evidence source label kept stable across the SNMP→ZPL swap.
         ev = state.add_evidence(specialist=self.name, source="snmp_alerts", content=content)
         evidence_items.append(ev.evidence_id)
-        actions_taken.append("snmp alerts read")
+        actions_taken.append("zpl extended status read")
 
         # ------------------------------------------------------------------
         # 5. IPP attribute read (cross-check + reason strings)
@@ -394,6 +442,8 @@ class DeviceSpecialist(Specialist):
                 ActionStatus.PENDING,
                 ActionStatus.CONFIRMED,
                 ActionStatus.EXECUTED,
+                ActionStatus.VERIFYING,
+                ActionStatus.RESOLVED,
             }
             for a in state.action_log
         )
@@ -408,44 +458,53 @@ class DeviceSpecialist(Specialist):
             actions_taken.append("propose calibrate")
 
         # ------------------------------------------------------------------
-        # 10. Action execution (Phase 4.1)
+        # 10. Action execution (Phase 4.1, refactored in 4.3)
         # ------------------------------------------------------------------
-        # Find every action_log entry whose status is CONFIRMED and whose
-        # action name we know how to execute. For each:
+        # Phase 4.3: each logical action now flows through one entry whose
+        # status mutates over time (PENDING → CONFIRMED → EXECUTED →
+        # VERIFYING → RESOLVED, branching to FAILED on any aborted step).
+        # The full chronological history lives on entry.status_history;
+        # the SSE bridge picks up status changes via per-entry snapshot
+        # diffing and emits a fresh `action` event per transition. The
+        # frontend uses entry_id to OOB-swap the same row in place.
+        #
+        # For each CONFIRMED entry we know how to execute:
         #  - re-check preconditions (no active fault) via fresh ~HS read
-        #  - dispatch via getattr on the tools module (matches existing
-        #    direct-call pattern in cups_/windows_specialist)
-        #  - settle delay
-        #  - verify via second ~HS read
-        #  - append a new EXECUTED entry recording the result; the original
-        #    CONFIRMED entry is left in place for audit history
+        #  - dispatch via getattr on the tools module
+        #  - flip to EXECUTED, then VERIFYING, settle, verify via second ~HS
+        #  - flip to RESOLVED (verify ok) or FAILED (verify problem)
         confirmed_executable = [
             a for a in state.action_log
             if a.status == ActionStatus.CONFIRMED
             and a.action in _EXECUTABLE_ACTIONS
         ]
-        # Skip entries that already have a sibling EXECUTED entry (loop
-        # ran the same action in a previous iteration). Without this guard,
-        # confirming once would re-execute every iteration.
-        already_executed_actions = {
-            a.action for a in state.action_log
-            if a.status == ActionStatus.EXECUTED
-            and a.action in _EXECUTABLE_ACTIONS
+        # An entry that has *ever* progressed past CONFIRMED has already
+        # been handled — its status_history will contain EXECUTED. Without
+        # this guard, the next iteration would re-fire on a stale CONFIRMED
+        # snapshot. (Mutation happens in-place but a previous iteration
+        # might have failed mid-flow; status_history captures that.)
+        already_handled_entries = {
+            a.entry_id for a in state.action_log
+            if ActionStatus.EXECUTED in a.status_history
+            or a.status in {
+                ActionStatus.EXECUTED,
+                ActionStatus.VERIFYING,
+                ActionStatus.RESOLVED,
+                ActionStatus.FAILED,
+            }
         }
         confirmed_executable = [
             a for a in confirmed_executable
-            if a.action not in already_executed_actions
+            if a.entry_id not in already_handled_entries
         ]
 
         for entry in confirmed_executable:
             # 10a. Pre-execution precondition check.
             pre = zpl_zt411_host_status(ip)
             if not pre.success or not pre.output:
-                state.log_action(
-                    specialist=self.name,
-                    action=entry.action,
-                    risk=entry.risk,
-                    status=ActionStatus.FAILED,
+                state.update_action_status(
+                    entry.entry_id,
+                    ActionStatus.FAILED,
                     result=f"precondition read failed: {pre.error}",
                 )
                 actions_taken.append(f"abort {entry.action}: pre-read failed")
@@ -461,11 +520,9 @@ class DeviceSpecialist(Specialist):
                     k for k in ("head_open", "media_out", "ribbon_out")
                     if pre_flags.get(k)
                 )
-                state.log_action(
-                    specialist=self.name,
-                    action=entry.action,
-                    risk=entry.risk,
-                    status=ActionStatus.FAILED,
+                state.update_action_status(
+                    entry.entry_id,
+                    ActionStatus.FAILED,
                     result=f"precondition violated: {fault_desc} active at execution time",
                 )
                 state.add_evidence(
@@ -473,8 +530,8 @@ class DeviceSpecialist(Specialist):
                     source="action_aborted",
                     content=(
                         f"Aborted {entry.action} — {fault_desc} appeared between "
-                        f"confirmation and execution. Original entry "
-                        f"{entry.entry_id} stays CONFIRMED for audit."
+                        f"confirmation and execution. Entry {entry.entry_id} "
+                        f"flipped to FAILED."
                     ),
                 )
                 actions_taken.append(f"abort {entry.action}: {fault_desc}")
@@ -485,28 +542,42 @@ class DeviceSpecialist(Specialist):
             # affects this call site without needing registry surgery.
             tool_fn = getattr(_tools_mod, entry.action, None)
             if not callable(tool_fn):
-                state.log_action(
-                    specialist=self.name,
-                    action=entry.action,
-                    risk=entry.risk,
-                    status=ActionStatus.FAILED,
+                state.update_action_status(
+                    entry.entry_id,
+                    ActionStatus.FAILED,
                     result=f"unknown action callable: {entry.action!r}",
                 )
                 actions_taken.append(f"abort {entry.action}: not callable")
                 continue
             tool_result = tool_fn(ip)
             if not tool_result.success:
-                state.log_action(
-                    specialist=self.name,
-                    action=entry.action,
-                    risk=entry.risk,
-                    status=ActionStatus.FAILED,
+                state.update_action_status(
+                    entry.entry_id,
+                    ActionStatus.FAILED,
                     result=f"tool call failed: {tool_result.error}",
                 )
                 actions_taken.append(f"failed {entry.action}: {tool_result.error[:40]}")
                 continue
 
-            # 10c. Settle, then verify post-action state.
+            # 10c. Tool call succeeded — flip to EXECUTED, then VERIFYING.
+            # The two transitions are intentionally distinct: EXECUTED
+            # records that the bytes left the wire, VERIFYING records
+            # that we are now in the settle window before re-reading.
+            sent_bytes = (
+                tool_result.output.get("sent_bytes") if tool_result.output else "?"
+            )
+            state.update_action_status(
+                entry.entry_id,
+                ActionStatus.EXECUTED,
+                result=f"sent_bytes={sent_bytes}; awaiting verify",
+            )
+            state.update_action_status(
+                entry.entry_id,
+                ActionStatus.VERIFYING,
+                result=f"sent_bytes={sent_bytes}; settle window ({_ACTION_SETTLE_DELAY_S}s)",
+            )
+
+            # 10d. Settle, then verify post-action state.
             time.sleep(_ACTION_SETTLE_DELAY_S)
             post = zpl_zt411_host_status(ip)
             verify_ok = (
@@ -523,17 +594,15 @@ class DeviceSpecialist(Specialist):
                 if verify_ok
                 else f"verify failed: success={post.success} flags={post.output}"
             )
-            state.log_action(
-                specialist=self.name,
-                action=entry.action,
-                risk=entry.risk,
-                status=ActionStatus.EXECUTED,
-                result=(
-                    f"sent_bytes={tool_result.output.get('sent_bytes') if tool_result.output else '?'}; "
-                    f"{verify_summary}"
-                ),
+            final_status = ActionStatus.RESOLVED if verify_ok else ActionStatus.FAILED
+            state.update_action_status(
+                entry.entry_id,
+                final_status,
+                result=f"sent_bytes={sent_bytes}; {verify_summary}",
             )
-            actions_taken.append(f"executed {entry.action}")
+            actions_taken.append(
+                f"executed {entry.action} -> {final_status.value}"
+            )
 
             if verify_ok and entry.action == "zpl_zt411_calibrate":
                 # Calibration completed without entering a fault — that's

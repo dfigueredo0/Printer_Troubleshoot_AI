@@ -70,6 +70,23 @@ def _patch_replay(monkeypatch, fixture_name: str) -> None:
         "zt411_agent.agent.device_specialist.zpl_zt411_host_status",
         replay["zpl_zt411_host_status"],
     )
+    # Phase 4.2: identity / alerts now via ZPL ~HI / ~HQES.
+    monkeypatch.setattr(
+        "zt411_agent.agent.tools.zpl_zt411_host_identification",
+        replay["zpl_zt411_host_identification"],
+    )
+    monkeypatch.setattr(
+        "zt411_agent.agent.device_specialist.zpl_zt411_host_identification",
+        replay["zpl_zt411_host_identification"],
+    )
+    monkeypatch.setattr(
+        "zt411_agent.agent.tools.zpl_zt411_extended_status",
+        replay["zpl_zt411_extended_status"],
+    )
+    monkeypatch.setattr(
+        "zt411_agent.agent.device_specialist.zpl_zt411_extended_status",
+        replay["zpl_zt411_extended_status"],
+    )
 
 
 def _initial_state() -> AgentState:
@@ -145,15 +162,17 @@ class TestPausedFixture:
         assert state.device.media_out is False
         assert state.device.ribbon_out is False
 
-    def test_alert_table_only_pause_alert(self, monkeypatch):
+    def test_pause_does_not_register_as_error_via_hqes(self, monkeypatch):
         _patch_replay(monkeypatch, "zt411_fixture_paused.json")
         state = _initial_state()
         DeviceSpecialist().act(state)
-        # Pure-pause fixture: only the (group=1, code=11) pause alert
-        # passes the severity>=3 filter; the boot informational entry
-        # (severity=1) is filtered out.
-        assert state.device.error_codes == ["alert:1.11"]
-        assert state.device.alerts == ["group=1,code=11,sev=3"]
+        # Phase 4.2: alerts come from ~HQES counts, not the SNMP alert
+        # table. On this firmware, a user-pressed pause does not increment
+        # errors_count or warnings_count — pause is surfaced via ~HS only.
+        # The granularity loss vs. the old SNMP path is documented in the
+        # findings doc and tracked for phase 5 bitmask decoding.
+        assert state.device.error_codes == []
+        assert state.device.alerts == []
 
     def test_resume_recommendation_logged_pending_low_risk(self, monkeypatch):
         _patch_replay(monkeypatch, "zt411_fixture_paused.json")
@@ -194,61 +213,55 @@ class TestPausedFixture:
 
 
 @pytest.mark.parametrize(
-    ("fixture_name", "expected_alert_code"),
+    "fixture_name",
     [
-        ("zt411_fixture_head_open.json", "alert:4.5"),
-        ("zt411_fixture_media_out.json", "alert:2.1"),
-        ("zt411_fixture_ribbon_out.json", "alert:3.2"),
+        "zt411_fixture_head_open.json",
+        "zt411_fixture_media_out.json",
+        "zt411_fixture_ribbon_out.json",
     ],
 )
 
 class TestFaultFixtures:
-    """Fault fixtures populate the alert table with the (group, code) pair
-    matching the induced fault, plus the auto-companion pause alert.
+    """Fault fixtures should report errors_count > 0 via ~HQES, plus the
+    paused flag via ~HS (every fault emits a companion pause).
 
-    The current snmp_zt411_physical_flags() reads only bitmask part 1,
-    which is zero in the captured fixtures — so head_open / media_out /
-    ribbon_out booleans stay False. The alert table cross-check still
-    correctly identifies the fault, just at the error_codes level.
+    Phase 4.2: error_codes lost the named (group, code) granularity
+    because the SNMP alert-table read was retired. error_codes now
+    contains a synthetic 'hqes:errors_count=N' marker until phase 5
+    bitmask decoding lands.
     """
 
-    def test_fault_alert_in_error_codes(
-        self, monkeypatch, fixture_name, expected_alert_code
+    def test_errors_count_in_error_codes(
+        self, monkeypatch, fixture_name
     ):
         _patch_replay(monkeypatch, fixture_name)
         state = _initial_state()
         DeviceSpecialist().act(state)
-        assert expected_alert_code in state.device.error_codes
+        assert any(c.startswith("hqes:errors_count=") for c in state.device.error_codes), (
+            f"expected an hqes:errors_count marker in {state.device.error_codes!r}"
+        )
 
-    def test_companion_pause_alert_present(
-        self, monkeypatch, fixture_name, expected_alert_code
+    def test_alerts_populated_with_bitmask(
+        self, monkeypatch, fixture_name
     ):
         _patch_replay(monkeypatch, fixture_name)
         state = _initial_state()
         DeviceSpecialist().act(state)
-        # Faults emit a code=11 pause companion in addition to the
-        # primary fault row. Both should pass the severity>=3 filter.
-        assert "alert:1.11" in state.device.error_codes
+        # state.device.alerts captures the bitmask string for later phase-5
+        # decoding. Just assert non-empty + bitmask field present.
+        assert state.device.alerts, "fault fixture should produce ~HQES alerts entry"
+        assert "bitmask=" in state.device.alerts[0]
 
-    def test_paused_flag_true_via_alert_cross_check(
-        self, monkeypatch, fixture_name, expected_alert_code
+    def test_paused_flag_true_via_companion_pause(
+        self, monkeypatch, fixture_name
     ):
         _patch_replay(monkeypatch, fixture_name)
         state = _initial_state()
         DeviceSpecialist().act(state)
-        # Companion pause alert + NOT_READY bit drive paused=True.
+        # Faults still emit a companion pause via ~HS, regardless of how
+        # alerts are reported. The pause-discrimination path uses ~HS, not
+        # the SNMP alert table.
         assert state.device.paused is True
-
-    def test_kb_evidence_emitted_for_alert(
-        self, monkeypatch, fixture_name, expected_alert_code
-    ):
-        _patch_replay(monkeypatch, fixture_name)
-        state = _initial_state()
-        DeviceSpecialist().act(state)
-        kb_entries = [ev for ev in state.evidence if ev.source == "rag_error_kb"]
-        # One KB lookup per error_code; we expect at least the fault + pause
-        # companion to be looked up.
-        assert len(kb_entries) >= 1
 
 class TestFaultFixturesBooleanFlags:
     """The dedicated boolean fields on state.device should reflect the
@@ -309,3 +322,71 @@ class TestPostTestIdle:
         assert state.device.alerts == []
         assert state.device.error_codes == []
         assert state.device.paused is False
+
+
+# ---------------------------------------------------------------------------
+# Loop-intent gating (Phase 4.2)
+# ---------------------------------------------------------------------------
+
+
+class TestLoopIntentGating:
+    """LoopIntent.CALIBRATE should skip the SNMP consumables read, which
+    is the one device-side tool with no ZPL replacement on this firmware
+    and which is the slowest/most-likely-to-time-out call when UDP/161 is
+    silent. GENERAL and the consumables-relevant intents must still call
+    it so legacy callers see no behavior change.
+    """
+
+    def test_calibrate_intent_skips_consumables_read(self, monkeypatch):
+        from zt411_agent.state import LoopIntent
+
+        _patch_replay(monkeypatch, "zt411_fixture_idle_baseline.json")
+        consumables_calls = {"n": 0}
+
+        def spy_consumables(ip, community="public"):
+            consumables_calls["n"] += 1
+            from zt411_agent.agent.tools import ToolResult
+            return ToolResult(success=True, output={"media": "ok", "ribbon": "ok"})
+
+        monkeypatch.setattr(
+            "zt411_agent.agent.tools.snmp_zt411_consumables", spy_consumables
+        )
+        monkeypatch.setattr(
+            "zt411_agent.agent.device_specialist.snmp_zt411_consumables",
+            spy_consumables,
+        )
+
+        state = _initial_state()
+        state.loop_intent = LoopIntent.CALIBRATE
+        DeviceSpecialist().act(state)
+
+        assert consumables_calls["n"] == 0, (
+            "CALIBRATE intent must skip snmp_zt411_consumables; "
+            f"got {consumables_calls['n']} call(s)."
+        )
+
+    def test_general_intent_still_calls_consumables(self, monkeypatch):
+        from zt411_agent.state import LoopIntent
+
+        _patch_replay(monkeypatch, "zt411_fixture_idle_baseline.json")
+        consumables_calls = {"n": 0}
+
+        def spy_consumables(ip, community="public"):
+            consumables_calls["n"] += 1
+            from zt411_agent.agent.tools import ToolResult
+            return ToolResult(success=True, output={"media": "ok", "ribbon": "ok"})
+
+        monkeypatch.setattr(
+            "zt411_agent.agent.tools.snmp_zt411_consumables", spy_consumables
+        )
+        monkeypatch.setattr(
+            "zt411_agent.agent.device_specialist.snmp_zt411_consumables",
+            spy_consumables,
+        )
+
+        state = _initial_state()
+        # GENERAL is the default; assert by setting it explicitly.
+        state.loop_intent = LoopIntent.GENERAL
+        DeviceSpecialist().act(state)
+
+        assert consumables_calls["n"] == 1

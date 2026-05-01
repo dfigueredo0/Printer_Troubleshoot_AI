@@ -18,9 +18,9 @@ to implement.
 | Workstation IP                           | `192.168.99.21` _(confirm)_          |
 | Firmware (per Phase 2)                   | `V92.21.39Z`                         |
 | Front-panel pause LED **before testing** | on (paused) — re-press between runs  |
-| `Get Community` (front-panel printout)   | _community_                          |
-| `Set Community` (`WRITE_COMMUNITY`)      | \*private                            |
-| `Trap Community`                         | _trapuser_                           |
+| `Get Community` (front-panel printout)   | `community`                          |
+| `Set Community` (`WRITE_COMMUNITY`)      | `private`                            |
+| `Trap Community`                         | `trapuser`                           |
 | SNMP SET enabled in printer config?      | _fill in (if NO → skip mechanism 1)_ |
 | Phase 2 baseline `paused: True` returns? | _fill in_                            |
 
@@ -29,24 +29,24 @@ to implement.
 Re-ran the pre-flight from `192.168.99.21` after drafting this doc; results
 materially change the Phase 2.5 reasoning:
 
-| Probe                                                         | Result                                          |
-| ------------------------------------------------------------- | ----------------------------------------------- |
-| `ping 192.168.99.10` (Windows)                                | 2/2 replies, sub-1ms                            |
-| `socket.create_connection((ip, 9100), 3s)` (Windows)          | open                                            |
-| `snmp_get sysDescr` (Windows pysnmp, 10s timeout)             | timeout                                         |
-| `snmp_get ZBR_STATE_BITMASK` `10642.2.10.3.7.0` (Windows, 3s) | timeout                                         |
-| `snmp_zt411_physical_flags` (Windows)                         | `success=False`, `"...timeout"`                 |
-| `verify_snmp_set.py --baseline` (Windows)                     | exit 2, "STOP — Phase 2 read regression"        |
-| `ping 192.168.99.10` (WSL Ubuntu)                             | 2/2 replies, ~1ms                               |
-| `snmpget -v2c -c public -t 5 -r 0 ... sysDescr` (WSL)         | `Timeout: No Response from 192.168.99.10`       |
-| `snmpget ... 10642.2.10.3.7.0` (WSL)                          | `Timeout: No Response from 192.168.99.10`       |
+| Probe                                                         | Result                                    |
+| ------------------------------------------------------------- | ----------------------------------------- |
+| `ping 192.168.99.10` (Windows)                                | 2/2 replies, sub-1ms                      |
+| `socket.create_connection((ip, 9100), 3s)` (Windows)          | open                                      |
+| `snmp_get sysDescr` (Windows pysnmp, 10s timeout)             | timeout                                   |
+| `snmp_get ZBR_STATE_BITMASK` `10642.2.10.3.7.0` (Windows, 3s) | timeout                                   |
+| `snmp_zt411_physical_flags` (Windows)                         | `success=False`, `"...timeout"`           |
+| `verify_snmp_set.py --baseline` (Windows)                     | exit 2, "STOP — Phase 2 read regression"  |
+| `ping 192.168.99.10` (WSL Ubuntu)                             | 2/2 replies, ~1ms                         |
+| `snmpget -v2c -c public -t 5 -r 0 ... sysDescr` (WSL)         | `Timeout: No Response from 192.168.99.10` |
+| `snmpget ... 10642.2.10.3.7.0` (WSL)                          | `Timeout: No Response from 192.168.99.10` |
 
 **Correction to the Phase 2.5 reasoning below.** The body of this doc
 attributes `snmp_zt411_physical_flags` failure to "the `683.*` tree is
 empty on this firmware." That reasoning is **incorrect**:
 `snmp_zt411_physical_flags` (`tools.py:786`) reads
 `ZBR_STATE_BITMASK = "1.3.6.1.4.1.10642.2.10.3.7.0"` — the **Zebra
-`10642.*` tree**, not the PWG `683.*` tree. The 683.* tree being absent
+`10642.*` tree**, not the PWG `683.*` tree. The 683.\* tree being absent
 does not directly explain why `physical_flags` returns no data.
 
 **The actual cause is broader.** The printer's SNMP agent is currently
@@ -186,3 +186,64 @@ top of the Session 4.1 design doc when you write it:
 
 > **Unpause transport: `<SNMP SET | ZPL ~PS | SGD>`. Verification: `<YYYY-MM-DD>`.
 > See `docs/phase4/snmp_set_findings.md`.**
+
+---
+
+## Phase 4.2 ZPL host-query survey (2026-05-01)
+
+Pre-flight for the Session 4.2 SNMP→ZPL preamble — surveyed the four
+ZPL host-query commands that sit closest to the demo's critical path on
+the lab printer (firmware V92.21.39Z), with UDP/161 still silent. All
+sent over TCP/9100 via `_zpl_send_over_9100(..., expect_response=True)`.
+
+### Results
+
+| Command    | Lab response (verbatim)                                                                       | Demo-relevant fields                                                   | Replaces                                                             |
+| ---------- | --------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| `~HI`      | `ZT411-200dpi,V92.21.39Z,8,8176KB`                                                            | model, firmware, memory option, memory KB                              | `snmp_zt411_status`                                                  |
+| `~HQES`    | 3-line `PRINTER STATUS` block: `ERRORS: 0 00000000 00000000`, `WARNINGS: 0 00000000 00000000` | errors_count, warnings_count, two error bitmasks, two warning bitmasks | `snmp_zt411_alerts` (counts only; named-condition decoding deferred) |
+| `~HQODV`   | empty / no response on this firmware                                                          | n/a                                                                    | (no replacement candidate)                                           |
+| `~HQMAINT` | maintenance-counter dump (head distance, label cuts, etc.)                                    | not relevant for the calibrate demo                                    | n/a                                                                  |
+
+Missing from `~HI` vs SNMP `snmp_zt411_status`: serial number — there
+is no ZPL host-query that surfaces it on this firmware. The demo path
+does not consume the serial, so the swap is acceptable.
+
+`~HQES` reports counts only on the lab printer; bitmask fields are
+reported but their named-condition mapping (which bit position →
+`HEAD_OPEN`, `MEDIA_OUT`, etc.) is firmware-defined and not yet decoded.
+For the calibrate demo's "is the printer healthy enough to accept ~JC"
+gate, `errors_count == 0 and warnings_count == 0` is sufficient. Bitmask
+decoding tracked as a Phase 5 follow-up — see TODO in `tools.py`.
+
+### Implementation in Session 4.2
+
+| Path                                  | Before (Session 4.1)     | After (Session 4.2)                                                                                                                                                              |
+| ------------------------------------- | ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Identity (model / firmware)           | `snmp_zt411_status`      | `zpl_zt411_host_identification` (`~HI`)                                                                                                                                          |
+| Errors / warnings                     | `snmp_zt411_alerts`      | `zpl_zt411_extended_status` (`~HQES`)                                                                                                                                            |
+| Consumables (media / ribbon presence) | `snmp_zt411_consumables` | `snmp_zt411_consumables` — gated behind `LoopIntent`. Skipped for `CALIBRATE` and `DIAGNOSE_NETWORK`; preserved for `GENERAL`, `DIAGNOSE_CONSUMABLES`, `DIAGNOSE_PRINT_QUALITY`. |
+
+Granularity loss: `state.device.error_codes` previously held named
+`alert:<group>.<code>` pairs from the SNMP alert table; it now holds a
+synthetic `hqes:errors_count=<N>` marker. The KB lookup off
+`error_codes` will mostly miss until phase-5 bitmask decoding lands —
+acceptable for the demo because the calibrate path's success criterion
+is the post-execution `~HS` re-read (`post-state healthy`), not the KB
+lookup.
+
+### Operational conclusions
+
+1. The demo path no longer touches `snmp_zt411_status` or
+   `snmp_zt411_alerts` — calibrate-only sessions can run end-to-end
+   without UDP/161 responding at all.
+2. `snmp_zt411_consumables` remains the one SNMP call on any device
+   path that has no working ZPL replacement on this firmware. Gating it
+   behind `LoopIntent` keeps the calibrate demo green when SNMP is
+   silent, while preserving the existing consumables-aware paths
+   (`GENERAL`, `DIAGNOSE_CONSUMABLES`, `DIAGNOSE_PRINT_QUALITY`) for
+   any printer where SNMP works.
+3. The `network_specialist`'s `snmp_get(ip, ZT411OIDs.SYS_DESCR)` is
+   intentionally out of scope for this swap — it is the canonical "is
+   SNMP working at all" probe, and the loss of that signal would hurt
+   network-path diagnostics. Not changed in 4.2.
